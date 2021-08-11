@@ -1,0 +1,16 @@
+*.iml
+.gradle
+.idea
+.DS_Store
+.externalNativeBuild
+.cxx
+build
+gradle
+captures
+local.properties
+app/.cxx
+app/build
+baseLib/build
+p2pLib/build
+rtplib/build
+rtplib/rtplib.iml
