@@ -33,8 +33,8 @@ android {
     }
     signingConfigs {
         config {
-            storeFile file("../ext/keystore/platform.jks")
-            keyAlias 'androiddebugkey'
+            storeFile file("../ext/keystore/debug.keystore")
+            keyAlias 'weidi'
             keyPassword 'android'
             storePassword 'android'
         }

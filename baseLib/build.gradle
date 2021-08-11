@@ -14,15 +14,6 @@ android {
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
         consumerProguardFiles 'consumer-rules.pro'
-        signingConfigs {
-            config {
-                storeFile file("../ext/keystore/platform.jks")
-                keyAlias 'androiddebugkey'
-                keyPassword 'android'
-                storePassword 'android'
-            }
-        }
-
     }
 
     buildTypes {
