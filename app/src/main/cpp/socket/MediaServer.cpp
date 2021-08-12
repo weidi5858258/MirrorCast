@@ -498,7 +498,7 @@ void *receive_data(void *arg) {
                 } else {
                     // data_buffer want_to_read_length
                     // 把data_buffer传递到java层
-                    putData(which_client, data_buffer, want_to_read_length);
+                    putDataToJava(which_client, data_buffer, want_to_read_length);
                 }
                 continue;
             } else {

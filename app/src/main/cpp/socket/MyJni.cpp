@@ -151,7 +151,7 @@ void setData(int code, int which_client, const char *data, ssize_t size) {
     }
 }
 
-void putData(int which_client, unsigned char *encodedData, ssize_t size) {
+void putDataToJava(int which_client, unsigned char *encodedData, ssize_t size) {
     JNIEnv *bufferEnv;
     bool isAttached = getEnv(&bufferEnv);
     if (bufferEnv != nullptr
@@ -255,7 +255,7 @@ static jint onTransact_init(JNIEnv *env, jobject myJniObject, jint code, jobject
     jni2JavaMethodID = env->GetMethodID(
             MyJniClass, "jni2Java", "(ILcom/weidi/mirrorcast/JniObject;)V");
     putDataMethodID = env->GetMethodID(
-            MyJniClass, "putData", "(I[BI)V");
+            MyJniClass, "putDataToJava", "(I[BI)V");
 
     jobject jni_object;
     jfieldID fieldID;

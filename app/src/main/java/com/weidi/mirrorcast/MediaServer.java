@@ -381,7 +381,7 @@ public class MediaServer {
     }
 
     private void putData(int which_client, byte[] buffer) {
-        //MyJni.getDefault().putData(which_client, buffer, buffer.length);
+        //MyJni.getDefault().putDataToJava(which_client, buffer, buffer.length);
     }
 
 }

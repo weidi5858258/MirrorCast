@@ -364,7 +364,7 @@ public class MyJni {
                     try {
                         mPlayQueue1.put(frame);
                     } catch (Exception e) {
-                        Log.e(TAG, "putData() exception : " + e.toString());
+                        Log.e(TAG, "putDataToJava() exception : " + e.toString());
                     }
                 }
                 return;
@@ -374,7 +374,7 @@ public class MyJni {
                     try {
                         mPlayQueue2.put(frame);
                     } catch (Exception e) {
-                        Log.e(TAG, "putData() exception : " + e.toString());
+                        Log.e(TAG, "putDataToJava() exception : " + e.toString());
                     }
                 }
                 return;

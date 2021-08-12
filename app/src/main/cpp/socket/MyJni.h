@@ -52,6 +52,6 @@ void changeWindow(int which_client, int orientation);
 
 void setData(int code, int which_client, const char *data, ssize_t size);
 
-void putData(int which_client, unsigned char *encodedData, ssize_t size);
+void putDataToJava(int which_client, unsigned char *encodedData, ssize_t size);
 
 #endif //USEFRAGMENTS_FFMPEG_H

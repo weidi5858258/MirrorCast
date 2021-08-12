@@ -1121,7 +1121,7 @@ public class MediaClientService extends Service {
             EventBusUtils.post(MainActivity.class, MAINACTIVITY_ON_RESUME, null);
         }
         // long end = SystemClock.uptimeMillis();
-        // Log.i(TAG, "putData() video take time: " + (end - start));
+        // Log.i(TAG, "putDataToJava() video take time: " + (end - start));
         // B
         // 从A到B花费的时间大概为0~2ms
     }
