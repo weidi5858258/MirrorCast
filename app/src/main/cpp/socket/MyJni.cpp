@@ -255,7 +255,7 @@ static jint onTransact_init(JNIEnv *env, jobject myJniObject, jint code, jobject
     jni2JavaMethodID = env->GetMethodID(
             MyJniClass, "jni2Java", "(ILcom/weidi/mirrorcast/JniObject;)V");
     putDataMethodID = env->GetMethodID(
-            MyJniClass, "putDataToJava", "(I[BI)V");
+            MyJniClass, "putData", "(I[BI)V");
 
     jobject jni_object;
     jfieldID fieldID;

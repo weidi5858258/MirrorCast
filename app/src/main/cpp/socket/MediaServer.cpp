@@ -384,6 +384,7 @@ void *receive_data(void *arg) {
     // region 分配变量
     int which_client = 0;
     int client_sock_fd = 0;
+    ssize_t want_to_read_length = 0;
     uint8_t *read_buffer = NULL;
     uint8_t *data_buffer = NULL;
     switch (*argc) {
@@ -417,6 +418,9 @@ void *receive_data(void *arg) {
     LOGI("MediaServer receive_data() client_sock_fd2: %d\n", client_sock_fd2);
 
     // region 读取客户端的"设备名称"
+    int width = 0;
+    int height = 0;
+    int orientation = 1;// 初始化时投屏端设备的方向(1为竖屏,2为横屏)
     char client_info[1024];
     char temp_client_info[1024];
     memset(client_info, 0, sizeof(client_info));
@@ -424,7 +428,7 @@ void *receive_data(void *arg) {
     int ret = read_data(client_sock_fd, 4, read_buffer, data_buffer);
     LOGI("receive_data() ret: %d\n", ret);
     if (ret == EXIT_SUCCESS) {
-        int want_to_read_length = uint8tToInt(data_buffer);
+        want_to_read_length = uint8tToInt(data_buffer);
         LOGI("receive_data() want_to_read_length: %d\n", want_to_read_length);
         if (want_to_read_length > 0) {
             ret = read_data(
@@ -452,15 +456,64 @@ void *receive_data(void *arg) {
                 setData(DO_SOMETHING_CODE_Client_set_info,
                         which_client, client_info, want_to_read_length);
                 if (MEDIA_CODEC_GO_JNI) {
-                    // ARS-AL00@@@@@video/hevc@@@@@1080@@@@@2244@@@@@1
-                    // 需要知道开始投屏时的方向
+                }
+                // ARS-AL00@@@@@video/hevc@@@@@1080@@@@@2244@@@@@1
+                // 需要知道开始投屏时的方向
+                int count = 0;
+                char *p = nullptr;
+                char *buff = nullptr;
+                buff = client_info;
+                p = strsep(&buff, "@@@@@");
+                while (p != nullptr) {
+                    size_t length = strlen(p);
+                    if (length > 0) {
+                        ++count;
+                        LOGI("receive_data() p: %s %d\n", p, length);
+                        if (count == 1) {
+                            // ARS-AL00
+                        } else if (count == 2) {
+                            // video/hevc
+                        } else if (count == 3) {
+                            // 1080
+                            width = atoi(p);
+                        } else if (count == 4) {
+                            // 2244
+                            height = atoi(p);
+                        } else if (count == 5) {
+                            // 1
+                            orientation = atoi(p);
+                        }
+                    }
+                    p = strsep(&buff, "@@@@@");
                 }
             }
         }
     }
     // endregion
 
-    ssize_t want_to_read_length = 0;
+    // region 先读取前面两组数据sps_pps
+    if (MEDIA_CODEC_GO_JNI) {
+        // 第一个sps_pps
+        ret = read_data(client_sock_fd, 4, read_buffer, data_buffer);
+        if (ret == EXIT_SUCCESS) {
+            want_to_read_length = uint8tToInt(data_buffer);
+            ret = read_data(client_sock_fd, want_to_read_length, read_buffer, data_buffer);
+            if (ret == EXIT_SUCCESS) {
+                set_sps_pps(which_client, orientation, data_buffer, want_to_read_length);
+            }
+        }
+        // 第二个sps_pps
+        ret = read_data(client_sock_fd, 4, read_buffer, data_buffer);
+        if (ret == EXIT_SUCCESS) {
+            want_to_read_length = uint8tToInt(data_buffer);
+            ret = read_data(client_sock_fd, want_to_read_length, read_buffer, data_buffer);
+            if (ret == EXIT_SUCCESS) {
+                set_sps_pps(which_client, orientation, data_buffer, want_to_read_length);
+            }
+        }
+    }
+    // endregion
+
     LOGI("receive_data() start which_client: %d\n", which_client);
     for (;;) {
         // 从套接字中读取数据放到缓冲区buffer中
@@ -493,8 +546,7 @@ void *receive_data(void *arg) {
                 }
 
                 if (MEDIA_CODEC_GO_JNI) {
-                    // 前面两组数据是sps_pps
-
+                    putData(which_client, data_buffer, want_to_read_length);
                 } else {
                     // data_buffer want_to_read_length
                     // 把data_buffer传递到java层
