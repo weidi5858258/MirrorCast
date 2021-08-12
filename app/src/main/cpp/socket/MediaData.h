@@ -10,7 +10,7 @@ void set_sps_pps(int which_client, int orientation, unsigned char *sps_pps, ssiz
 
 void set_orientation(int which_client, int orientation);
 
-void putData(int which_client, unsigned char *encodedData, ssize_t size);
+void putData2(int which_client, unsigned char *encodedData, ssize_t size);
 
 void free1();
 

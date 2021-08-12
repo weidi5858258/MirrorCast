@@ -6,8 +6,10 @@
 cmake_minimum_required(VERSION 3.4.1)
 #add_definitions(-std=c++11)
 
-set(CMAKE_BUILD_TYPE Debug)
+#set(CMAKE_BUILD_TYPE Debug)
 #set(CMAKE_BUILD_TYPE Release)
+
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -std=c++11 -Wall -UNDEBUG")
 
 # Creates and names a library, sets it as either STATIC
 # or SHARED, and provides the relative paths to its source code.
@@ -43,6 +45,10 @@ find_library(log-lib
         log)
 find_library(android-lib
         android)
+find_library(mediandk-lib
+        mediandk)
+find_library(OpenMAXAL-lib
+        OpenMAXAL)
 
 #[[find_library(audioclient-lib
         audioclient)
@@ -63,6 +69,8 @@ target_link_libraries(
         # ${log-lib}是log库的路径
         ${log-lib}
         ${android-lib}
+        ${mediandk-lib}
+        ${OpenMAXAL-lib}
 
         #[[${audioclient-lib}
         ${binder-lib}

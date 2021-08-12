@@ -106,7 +106,7 @@ void set_orientation(int which_client, int orientation) {
     }
 }
 
-void putData(int which_client, unsigned char *encodedData, ssize_t size) {
+void putData2(int which_client, unsigned char *encodedData, ssize_t size) {
     Data *data = (Data *) malloc(sizeof(Data));
     memset(data, 0, sizeof(Data));
     uint8_t *frame = (uint8_t *) malloc(size);
