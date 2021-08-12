@@ -33,40 +33,161 @@
  */
 
 static int TIME_OUT = 10000;
-static ANativeWindow *surface;
-static AMediaFormat *format;
-static AMediaCodec *codec;
-static bool isPlaying = true;
 
-AMediaCodec *getCodec() {
-    return codec;
-}
+// window1
+static ANativeWindow *surface1;
+static AMediaFormat *format1;
+static AMediaCodec *codec1;
+char mime1[50];
+char codecName1[50];
+int mimeLength1 = 0;
+int codecNameLength1 = 0;
+int width1 = 0;
+int height1 = 0;
+int orientation1 = 1;
+// window2
+static ANativeWindow *surface2;
+static AMediaFormat *format2;
+static AMediaCodec *codec2;
+char mime2[50];
+char codecName2[50];
+int mimeLength2 = 0;
+int codecNameLength2 = 0;
+int width2 = 0;
+int height2 = 0;
+int orientation2 = 1;
 
-void setSurface(JNIEnv *env, jobject surface_obj) {
-    if (surface) {
-        ANativeWindow_release(surface);
-        surface = nullptr;
+extern bool isPlaying1;
+extern uint8_t *sps_pps_portrait1;
+extern uint8_t *sps_pps_landscape1;
+extern ssize_t sps_pps_size_portrait1;
+extern ssize_t sps_pps_size_landscape1;
+extern bool isPlaying2;
+extern uint8_t *sps_pps_portrait2;
+extern uint8_t *sps_pps_landscape2;
+extern ssize_t sps_pps_size_portrait2;
+extern ssize_t sps_pps_size_landscape2;
+
+AMediaCodec *getCodec(int which_client) {
+    if (which_client == 1) {
+        return codec1;
+    } else if (which_client == 2) {
+        return codec2;
     }
-    surface = ANativeWindow_fromSurface(env, surface_obj);
+
+    return nullptr;
 }
 
-ANativeWindow *getSurface() {
-    return surface;
-}
-
-void start(const char *name,
-           const AMediaFormat *format,
-           ANativeWindow *surface,
-           AMediaCrypto *crypto,// nullptr
-           uint32_t flags) {
-    if (codec) {
-        AMediaCodec_delete(codec);
-        codec = nullptr;
+void setSurface(int which_client, JNIEnv *env, jobject surface_obj) {
+    if (which_client == 1) {
+        if (surface1) {
+            ANativeWindow_release(surface1);
+            surface1 = nullptr;
+        }
+        surface1 = ANativeWindow_fromSurface(env, surface_obj);
+    } else if (which_client == 2) {
+        if (surface2) {
+            ANativeWindow_release(surface2);
+            surface2 = nullptr;
+        }
+        surface2 = ANativeWindow_fromSurface(env, surface_obj);
     }
-    codec = AMediaCodec_createCodecByName(name);
-    AMediaCodec_configure(codec, format, surface, crypto, flags);
-    AMediaCodec_start(codec);
-    isPlaying = true;
+}
+
+void createMediaCodec(int which_client) {
+    if (which_client == 1) {
+        if (codec1) {
+            AMediaCodec_delete(codec1);
+            codec1 = nullptr;
+        }
+        codec1 = AMediaCodec_createCodecByName(codecName1);
+    } else if (which_client == 2) {
+        if (codec2) {
+            AMediaCodec_delete(codec2);
+            codec2 = nullptr;
+        }
+        codec2 = AMediaCodec_createCodecByName(codecName2);
+    }
+}
+
+void createMediaFormat(int which_client, int orientation) {
+    char *mime = nullptr;
+    int width = 0;
+    int height = 0;
+    int maxLength = 0;
+    if (orientation == 1) {
+        mime = mime1;
+        width = width1;
+        height = height1;
+        maxLength = height1;
+    } else {
+        mime = mime2;
+        width = width2;
+        height = height2;
+        maxLength = width2;
+    }
+    AMediaFormat *pFormat = AMediaFormat_new();
+    AMediaFormat_setString(pFormat, AMEDIAFORMAT_KEY_MIME, mime);
+    AMediaFormat_setInt32(pFormat, AMEDIAFORMAT_KEY_WIDTH, width);
+    AMediaFormat_setInt32(pFormat, AMEDIAFORMAT_KEY_HEIGHT, height);
+    AMediaFormat_setInt32(pFormat, AMEDIAFORMAT_KEY_MAX_WIDTH, maxLength);
+    AMediaFormat_setInt32(pFormat, AMEDIAFORMAT_KEY_MAX_HEIGHT, maxLength);
+    AMediaFormat_setInt32(pFormat, AMEDIAFORMAT_KEY_MAX_INPUT_SIZE, maxLength * maxLength);
+    if (strcmp(mime, "video/hevc") == 0) {
+        if (which_client == 1) {
+            if (orientation == 1) {
+                AMediaFormat_setBuffer(
+                        pFormat, "csd-0", sps_pps_portrait1, sps_pps_size_portrait1);
+            } else {
+                AMediaFormat_setBuffer(
+                        pFormat, "csd-0", sps_pps_landscape1, sps_pps_size_landscape1);
+            }
+        } else if (which_client == 2) {
+            if (orientation == 1) {
+                AMediaFormat_setBuffer(
+                        pFormat, "csd-0", sps_pps_portrait2, sps_pps_size_portrait2);
+            } else {
+                AMediaFormat_setBuffer(
+                        pFormat, "csd-0", sps_pps_landscape2, sps_pps_size_landscape2);
+            }
+        }
+    } else if (strcmp(mime, "video/avc") == 0) {
+
+    }
+
+    if (which_client == 1) {
+        if (format1) {
+            AMediaFormat_delete(format1);
+            format1 = nullptr;
+        }
+        format1 = pFormat;
+    } else if (which_client == 2) {
+        if (format2) {
+            AMediaFormat_delete(format2);
+            format2 = nullptr;
+        }
+        format2 = pFormat;
+    }
+}
+
+void start(int which_client, uint32_t flags) {
+    if (which_client == 1) {
+        if (!codec1 || !format1 || !surface1) {
+            return;
+        }
+        AMediaCodec_configure(codec1, format1, surface1, nullptr, flags);
+        AMediaCodec_start(codec1);
+        isPlaying1 = true;
+    } else if (which_client == 2) {
+        if (!codec2 || !format2 || !surface2) {
+            return;
+        }
+        AMediaCodec_configure(codec2, format2, surface2, nullptr, flags);
+        AMediaCodec_start(codec2);
+        isPlaying2 = true;
+    }
+
+
 }
 
 bool
@@ -94,7 +215,7 @@ drainOutputBuffer(AMediaCodec *codec, bool render) {
     AMediaCodecBufferInfo info;
     size_t out_size = 0;
     for (;;) {
-        if (!isPlaying) {
+        if (!isPlaying1) {
             break;
         }
 
@@ -155,18 +276,34 @@ feedInputBufferAndDrainOutputBuffer(AMediaCodec *codec,
     return drainOutputBuffer(codec, render);
 }
 
-void release() {
-    isPlaying = false;
-    if (surface) {
-        ANativeWindow_release(surface);
-        surface = nullptr;
+void release1() {
+    isPlaying1 = false;
+    if (surface1) {
+        ANativeWindow_release(surface1);
+        surface1 = nullptr;
     }
-    if (format) {
-        AMediaFormat_delete(format);
-        format = nullptr;
+    if (format1) {
+        AMediaFormat_delete(format1);
+        format1 = nullptr;
     }
-    if (codec) {
-        AMediaCodec_delete(codec);
-        codec = nullptr;
+    if (codec1) {
+        AMediaCodec_delete(codec1);
+        codec1 = nullptr;
+    }
+}
+
+void release2() {
+    isPlaying2 = false;
+    if (surface2) {
+        ANativeWindow_release(surface2);
+        surface2 = nullptr;
+    }
+    if (format2) {
+        AMediaFormat_delete(format2);
+        format2 = nullptr;
+    }
+    if (codec2) {
+        AMediaCodec_delete(codec2);
+        codec2 = nullptr;
     }
 }

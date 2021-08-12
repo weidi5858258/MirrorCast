@@ -8,6 +8,7 @@
 #include "MyJni.h"
 #include "MediaServer.h"
 #include "MediaClient.h"
+#include "MediaCodec.h"
 
 // 这个是自定义的LOG的标识
 #define LOG "player_alexander"
@@ -167,6 +168,31 @@ void putDataToJava(int which_client, unsigned char *encodedData, ssize_t size) {
     if (isAttached) {
         gJavaVm->DetachCurrentThread();
     }
+}
+
+char *findDecoderCodecName(int code, int which_client, const char *data, ssize_t size) {
+    JNIEnv *jniEnv;
+    bool isAttached = getEnv(&jniEnv);
+    jobject jniObject = jniEnv->AllocObject(jniObject_jclass);
+    jniEnv->SetIntField(jniObject, valueInt_jfieldID, (jint) which_client);
+    jniEnv->SetLongField(jniObject, valueLong_jfieldID, (jlong) size);
+    jniEnv->SetObjectField(jniObject, valueString_jfieldID, (jobject) jniEnv->NewStringUTF(data));
+    jni2Java(jniEnv, code, jniObject);
+
+    jstring codecNameStr =
+            static_cast<jstring>(jniEnv->GetObjectField(jniObject, valueString_jfieldID));
+    const char *codecName = jniEnv->GetStringUTFChars(codecNameStr, 0);
+    size_t length = strlen(codecName);
+    char tmpStr[length];
+    memcpy(tmpStr, codecName, length);
+    jniEnv->ReleaseStringUTFChars(codecNameStr, codecName);
+
+    jniEnv->DeleteLocalRef(jniObject);
+    if (isAttached) {
+        gJavaVm->DetachCurrentThread();
+    }
+
+    return tmpStr;
 }
 
 void closeJni() {
@@ -416,6 +442,11 @@ Java_com_weidi_mirrorcast_MyJni_onTransact(JNIEnv *env, jobject thiz,
         case DO_SOMETHING_CODE_close_one_client: {
             jint which_client = env->GetIntField(jniObject, valueInt_jfieldID);
             close_client(which_client);
+            return env->NewStringUTF(ret);
+        }
+        case DO_SOMETHING_CODE_set_surface:{
+            jint which_client = env->GetIntField(jniObject, valueInt_jfieldID);
+
             return env->NewStringUTF(ret);
         }
 

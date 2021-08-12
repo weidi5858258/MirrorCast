@@ -29,11 +29,13 @@ enum DO_SOMETHING_CODE {
     DO_SOMETHING_CODE_get_server_port = 1008,
     DO_SOMETHING_CODE_close_all_clients = 1009,
     DO_SOMETHING_CODE_close_one_client = 1010,
+    DO_SOMETHING_CODE_set_surface = 1011,
 
     // jni ---> java
     DO_SOMETHING_CODE_connected = 2000,
     DO_SOMETHING_CODE_disconnected = 2001,
     DO_SOMETHING_CODE_change_window = 2002,
+    DO_SOMETHING_CODE_find_decoder_codec_name = 2003,
 };
 
 enum {
@@ -53,5 +55,7 @@ void changeWindow(int which_client, int orientation);
 void setData(int code, int which_client, const char *data, ssize_t size);
 
 void putDataToJava(int which_client, unsigned char *encodedData, ssize_t size);
+
+char *findDecoderCodecName(int code, int which_client, const char *data, ssize_t size);
 
 #endif //USEFRAGMENTS_FFMPEG_H

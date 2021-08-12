@@ -24,21 +24,21 @@ typedef struct Data_ {
 static std::list<Data> list1;
 static std::list<Data> list2;
 
-static uint8_t *sps_pps_portrait1 = nullptr;
-static uint8_t *sps_pps_landscape1 = nullptr;
-static uint8_t *sps_pps_portrait2 = nullptr;
-static uint8_t *sps_pps_landscape2 = nullptr;
-static ssize_t sps_pps_size_portrait1 = 0;
-static ssize_t sps_pps_size_landscape1 = 0;
-static ssize_t sps_pps_size_portrait2 = 0;
-static ssize_t sps_pps_size_landscape2 = 0;
+uint8_t *sps_pps_portrait1 = nullptr;
+uint8_t *sps_pps_landscape1 = nullptr;
+uint8_t *sps_pps_portrait2 = nullptr;
+uint8_t *sps_pps_landscape2 = nullptr;
+ssize_t sps_pps_size_portrait1 = 0;
+ssize_t sps_pps_size_landscape1 = 0;
+ssize_t sps_pps_size_portrait2 = 0;
+ssize_t sps_pps_size_landscape2 = 0;
 
 static bool isCurPortrait1 = true;
 static bool isCurPortrait2 = true;
 static bool isPrePortrait1 = true;
 static bool isPrePortrait2 = true;
-static bool isPlaying1 = false;
-static bool isPlaying2 = false;
+bool isPlaying1 = false;
+bool isPlaying2 = false;
 
 void drainFrame(std::list<Data> *list) {
 
@@ -179,7 +179,7 @@ void start_decoder(int which_client) {
             break;
     }
 
-    AMediaCodec *codec = getCodec();
+    AMediaCodec *codec = getCodec(which_client);
     uint8_t *sps_pps_frame = nullptr;
     ssize_t sps_pps_frame_size = 0;
     bool ret = false;
@@ -281,20 +281,19 @@ void start_decoder(int which_client) {
         }
     }
 
-    release();
-
-    /*switch (which_client) {
+    switch (which_client) {
         case 1: {
-            release();
+            release1();
             break;
         }
         case 2: {
             isPlaying2 = false;
+            release2();
             break;
         }
         default:
             break;
-    }*/
+    }
 }
 
 void free1() {

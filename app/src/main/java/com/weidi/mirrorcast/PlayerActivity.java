@@ -7,7 +7,6 @@ import android.content.pm.ActivityInfo;
 import android.content.res.Configuration;
 import android.content.res.Resources;
 import android.media.MediaCodec;
-import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
 import android.os.Bundle;
 import android.os.Handler;
@@ -26,6 +25,8 @@ import java.nio.ByteBuffer;
 import java.util.Arrays;
 
 import androidx.appcompat.app.AppCompatActivity;
+
+import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_set_surface;
 
 public class PlayerActivity extends AppCompatActivity {
 
@@ -427,8 +428,12 @@ public class PlayerActivity extends AppCompatActivity {
                 }
                 if (!mWindow1IsPlaying) {
                     mWindow1IsPlaying = true;
-                    if (prepare1()) {
-                        addView(MSG_UI_ADD_VIEW, 1);
+                    if (MEDIA_CODEC_GO_JNI) {
+
+                    } else {
+                        if (prepare1()) {
+                            addView(MSG_UI_ADD_VIEW, 1);
+                        }
                     }
                     break;
                 }
@@ -445,8 +450,12 @@ public class PlayerActivity extends AppCompatActivity {
                 }
                 if (!mWindow2IsPlaying) {
                     mWindow2IsPlaying = true;
-                    if (prepare2()) {
-                        addView(MSG_UI_ADD_VIEW, 2);
+                    if (MEDIA_CODEC_GO_JNI) {
+
+                    } else {
+                        if (prepare2()) {
+                            addView(MSG_UI_ADD_VIEW, 2);
+                        }
                     }
                     break;
                 }
@@ -477,7 +486,7 @@ public class PlayerActivity extends AppCompatActivity {
             Log.e(TAG, "prepare1() VIDEO_MIME1 is empty");
             return false;
         }
-        CODEC_NAME1 = findCodecName(VIDEO_MIME1);
+        CODEC_NAME1 = MyJni.findDecoderCodecName(VIDEO_MIME1);
         Log.w(TAG, "prepare1() video VIDEO_MIME1: " + VIDEO_MIME1);
         Log.w(TAG, "prepare1() video CODEC_NAME1: " + CODEC_NAME1);
         if (TextUtils.isEmpty(CODEC_NAME1)) {
@@ -596,7 +605,7 @@ public class PlayerActivity extends AppCompatActivity {
             Log.e(TAG, "prepare2() VIDEO_MIME2 is empty");
             return false;
         }
-        CODEC_NAME2 = findCodecName(VIDEO_MIME2);
+        CODEC_NAME2 = MyJni.findDecoderCodecName(VIDEO_MIME2);
         Log.w(TAG, "prepare2() video VIDEO_MIME2: " + VIDEO_MIME2);
         Log.w(TAG, "prepare2() video CODEC_NAME2: " + CODEC_NAME2);
         if (TextUtils.isEmpty(CODEC_NAME2)) {
@@ -827,34 +836,6 @@ public class PlayerActivity extends AppCompatActivity {
         }
 
         return mark;
-    }
-
-    private String findCodecName(String mime) {
-        String codecName = null;
-        // 查找解码器名称
-        MediaCodecInfo[] mediaCodecInfos =
-                MediaUtils.findAllDecodersByMime(mime);
-        for (MediaCodecInfo mediaCodecInfo : mediaCodecInfos) {
-            if (mediaCodecInfo == null) {
-                continue;
-            }
-            codecName = mediaCodecInfo.getName();
-            if (TextUtils.isEmpty(codecName)) {
-                continue;
-            }
-            String tempCodecName = codecName.toLowerCase();
-            if (tempCodecName.startsWith("omx.google.")
-                    || tempCodecName.startsWith("c2.android.")
-                    // 用于加密的视频
-                    || tempCodecName.endsWith(".secure")
-                    || (!tempCodecName.startsWith("omx.") && !tempCodecName.startsWith("c2."))) {
-                codecName = null;
-                continue;
-            }
-            break;
-        }
-
-        return codecName;
     }
 
     private void addView(int what, int which_client) {
@@ -1396,6 +1377,13 @@ public class PlayerActivity extends AppCompatActivity {
 
         switch (which_client) {
             case 1: {
+                if (MEDIA_CODEC_GO_JNI) {
+                    JniObject jniObject = JniObject.obtain();
+                    jniObject.valueInt = which_client;
+                    jniObject.valueObject = mSurfaceView1.getHolder().getSurface();
+                    MyJni.getDefault().onTransact(DO_SOMETHING_CODE_set_surface, jniObject);
+                    return;
+                }
                 if (mVideoDataDecodeRunnable1 == null
                         && mVideoDecoderMediaCodec1 != null) {
                     Log.i(TAG, "surfaceCreated() mVideoDecoderMediaCodec1.configure");
@@ -1437,6 +1425,13 @@ public class PlayerActivity extends AppCompatActivity {
                 break;
             }
             case 2: {
+                if (MEDIA_CODEC_GO_JNI) {
+                    JniObject jniObject = JniObject.obtain();
+                    jniObject.valueInt = which_client;
+                    jniObject.valueObject = mSurfaceView2.getHolder().getSurface();
+                    MyJni.getDefault().onTransact(DO_SOMETHING_CODE_set_surface, jniObject);
+                    return;
+                }
                 if (mVideoDataDecodeRunnable2 == null
                         && mVideoDecoderMediaCodec2 != null) {
                     Log.i(TAG, "surfaceCreated() mVideoDecoderMediaCodec2.configure");
@@ -1480,9 +1475,6 @@ public class PlayerActivity extends AppCompatActivity {
                     new Thread(mVideoDataDecodeRunnable2).start();
                     Log.i(TAG, "surfaceCreated() video MediaCodec start");
                 }
-                break;
-            }
-            case 3: {
                 break;
             }
             default:

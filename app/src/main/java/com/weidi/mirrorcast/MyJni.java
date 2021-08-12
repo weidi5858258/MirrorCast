@@ -4,6 +4,8 @@ import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
 import android.media.MediaCodec;
+import android.media.MediaCodecInfo;
+import android.text.TextUtils;
 import android.util.Log;
 
 import java.util.Iterator;
@@ -75,11 +77,13 @@ public class MyJni {
     public static final int DO_SOMETHING_CODE_get_server_port = 1008;
     public static final int DO_SOMETHING_CODE_close_all_clients = 1009;
     public static final int DO_SOMETHING_CODE_close_one_client = 1010;
+    public static final int DO_SOMETHING_CODE_set_surface = 1011;
 
     // jni ---> java
     public static final int DO_SOMETHING_CODE_connected = 2000;
     public static final int DO_SOMETHING_CODE_disconnected = 2001;
     public static final int DO_SOMETHING_CODE_change_window = 2002;
+    public static final int DO_SOMETHING_CODE_find_decoder_codec_name = 2003;
 
     private Context mContext;
     private static final int QUEUE_LENGTH = 50;
@@ -321,6 +325,18 @@ public class MyJni {
                 }
                 break;
             }
+            case DO_SOMETHING_CODE_find_decoder_codec_name: {
+                if (jniObject == null) {
+                    return;
+                }
+                String mime = jniObject.valueString;
+                if (TextUtils.isEmpty(mime)) {
+                    return;
+                }
+                String codecName = findDecoderCodecName(mime);
+                jniObject.valueString = codecName;
+                break;
+            }
             default:
                 break;
         }
@@ -438,6 +454,32 @@ public class MyJni {
                 }
             }
         }
+    }
+
+    public static String findDecoderCodecName(String mime) {
+        String codecName = null;
+        // 查找解码器名称
+        MediaCodecInfo[] mediaCodecInfos = MediaUtils.findAllDecodersByMime(mime);
+        for (MediaCodecInfo mediaCodecInfo : mediaCodecInfos) {
+            if (mediaCodecInfo == null) {
+                continue;
+            }
+            codecName = mediaCodecInfo.getName();
+            if (TextUtils.isEmpty(codecName)) {
+                continue;
+            }
+            String tempCodecName = codecName.toLowerCase();
+            if (tempCodecName.startsWith("omx.google.")
+                    || tempCodecName.startsWith("c2.android.")
+                    || tempCodecName.endsWith(".secure")// 用于加密的视频
+                    || (!tempCodecName.startsWith("omx.") && !tempCodecName.startsWith("c2."))) {
+                codecName = null;
+                continue;
+            }
+            break;
+        }
+
+        return codecName;
     }
 
     public MediaServer.OnClientListener mOnClientListener =

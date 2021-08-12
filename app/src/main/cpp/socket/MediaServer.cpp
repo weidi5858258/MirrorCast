@@ -28,6 +28,7 @@
 
 #include "include/Log.h"
 #include "MyJni.h"
+#include "MediaCodec.h"
 #include "MediaData.h"
 
 #define LOG "player_alexander"
@@ -35,6 +36,21 @@
 #define PORT 5858
 #define BACKLOG 1 // 2
 #define DATA_BUFFER 2073600 // 1920*1080
+
+extern char *mime1;
+extern char *codecName1;
+extern int mimeLength1;
+extern int codecNameLength1;
+extern int width1;
+extern int height1;
+extern int orientation1;
+extern char *mime2;
+extern char *codecName2;
+extern int mimeLength2;
+extern int codecNameLength2;
+extern int width2;
+extern int height2;
+extern int orientation2;
 
 extern void client_connect();
 
@@ -473,15 +489,45 @@ void *receive_data(void *arg) {
                             // ARS-AL00
                         } else if (count == 2) {
                             // video/hevc
+                            char *name = findDecoderCodecName(
+                                    DO_SOMETHING_CODE_find_decoder_codec_name,
+                                    which_client, p, length);
+                            if (which_client == 1) {
+                                mimeLength1 = length;
+                                codecNameLength1 = strlen(name);
+                                memcpy(mime1, p, mimeLength1);
+                                memcpy(codecName1, name, codecNameLength1);
+                            } else if (which_client == 2) {
+                                mimeLength2 = length;
+                                codecNameLength2 = strlen(name);
+                                memcpy(mime2, p, mimeLength2);
+                                memcpy(codecName2, name, codecNameLength2);
+                            }
+                            LOGI("receive_data() codecName: %s\n", name);
                         } else if (count == 3) {
                             // 1080
                             width = atoi(p);
+                            if (which_client == 1) {
+                                width1 = width;
+                            } else if (which_client == 2) {
+                                width2 = width;
+                            }
                         } else if (count == 4) {
                             // 2244
                             height = atoi(p);
+                            if (which_client == 1) {
+                                height1 = height;
+                            } else if (which_client == 2) {
+                                height2 = height;
+                            }
                         } else if (count == 5) {
                             // 1
                             orientation = atoi(p);
+                            if (which_client == 1) {
+                                orientation1 = orientation;
+                            } else if (which_client == 2) {
+                                orientation2 = orientation;
+                            }
                         }
                     }
                     p = strsep(&buff, "@@@@@");
@@ -491,7 +537,7 @@ void *receive_data(void *arg) {
     }
     // endregion
 
-    // region 先读取前面两组数据sps_pps
+    // region 先读取sps_pps数据
     if (MEDIA_CODEC_GO_JNI) {
         // 第一个sps_pps
         ret = read_data(client_sock_fd, 4, read_buffer, data_buffer);
@@ -511,10 +557,14 @@ void *receive_data(void *arg) {
                 set_sps_pps(which_client, orientation, data_buffer, want_to_read_length);
             }
         }
+
+        createMediaCodec(which_client);
+        createMediaFormat(which_client, orientation);
     }
     // endregion
 
     LOGI("receive_data() start which_client: %d\n", which_client);
+    // region 读取数据
     for (;;) {
         // 从套接字中读取数据放到缓冲区buffer中
         //memset(buffer, 0, sizeof(buffer));
@@ -562,6 +612,7 @@ void *receive_data(void *arg) {
             break;
         }
     }
+    // endregion
     LOGI("receive_data() end   which_client: %d\n", which_client);
 
     switch (which_client) {

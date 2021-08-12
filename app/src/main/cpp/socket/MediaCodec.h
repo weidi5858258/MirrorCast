@@ -13,11 +13,13 @@
 #include <android/asset_manager.h>
 #include <android/asset_manager_jni.h>
 
-void setSurface(JNIEnv *env, jobject surface);
+AMediaCodec *getCodec(int which_client);
 
-ANativeWindow *getSurface();
+void setSurface(int which_client, JNIEnv *env, jobject surface);
 
-AMediaCodec *getCodec();
+void createMediaCodec(int which_client);
+
+void createMediaFormat(int which_client, int orientation);
 
 bool
 feedInputBufferAndDrainOutputBuffer(AMediaCodec *codec,
@@ -27,6 +29,8 @@ feedInputBufferAndDrainOutputBuffer(AMediaCodec *codec,
                                     bool render,
                                     bool needFeedInputBuffer);
 
-void release();
+void release1();
+
+void release2();
 
 #endif //MIRRORCAST_MEDIACODEC_H
