@@ -335,6 +335,8 @@ public class MyJni {
                 }
                 String codecName = findDecoderCodecName(mime);
                 jniObject.valueString = codecName;
+                Log.i(TAG, "DO_SOMETHING_CODE_find_decoder_codec_name codecName: " +
+                        codecName);
                 break;
             }
             default:

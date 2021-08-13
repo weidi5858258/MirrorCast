@@ -157,7 +157,7 @@ public class PlayerActivity extends AppCompatActivity {
 
     private static final int MSG_THREAD_SET_INTENT = 2000;
 
-    public static final boolean MEDIA_CODEC_GO_JNI = false;
+    public static final boolean MEDIA_CODEC_GO_JNI = true;
 
     public static boolean PLAYER_ACTIVITY_IS_LIVE = false;
 
@@ -429,7 +429,7 @@ public class PlayerActivity extends AppCompatActivity {
                 if (!mWindow1IsPlaying) {
                     mWindow1IsPlaying = true;
                     if (MEDIA_CODEC_GO_JNI) {
-
+                        addView(MSG_UI_ADD_VIEW, 1);
                     } else {
                         if (prepare1()) {
                             addView(MSG_UI_ADD_VIEW, 1);
@@ -451,7 +451,7 @@ public class PlayerActivity extends AppCompatActivity {
                 if (!mWindow2IsPlaying) {
                     mWindow2IsPlaying = true;
                     if (MEDIA_CODEC_GO_JNI) {
-
+                        addView(MSG_UI_ADD_VIEW, 2);
                     } else {
                         if (prepare2()) {
                             addView(MSG_UI_ADD_VIEW, 2);
@@ -1384,6 +1384,7 @@ public class PlayerActivity extends AppCompatActivity {
                     MyJni.getDefault().onTransact(DO_SOMETHING_CODE_set_surface, jniObject);
                     return;
                 }
+
                 if (mVideoDataDecodeRunnable1 == null
                         && mVideoDecoderMediaCodec1 != null) {
                     Log.i(TAG, "surfaceCreated() mVideoDecoderMediaCodec1.configure");
@@ -1432,6 +1433,7 @@ public class PlayerActivity extends AppCompatActivity {
                     MyJni.getDefault().onTransact(DO_SOMETHING_CODE_set_surface, jniObject);
                     return;
                 }
+
                 if (mVideoDataDecodeRunnable2 == null
                         && mVideoDecoderMediaCodec2 != null) {
                     Log.i(TAG, "surfaceCreated() mVideoDecoderMediaCodec2.configure");
@@ -1491,8 +1493,10 @@ public class PlayerActivity extends AppCompatActivity {
                 mVideoDecoderMediaCodec1 = null;
                 mVideoDecoderMediaFormat1 = null;
                 mEDCallback1 = null;
-                mVideoDataDecodeRunnable1.isPlaying = false;
-                mVideoDataDecodeRunnable1 = null;
+                if (mVideoDataDecodeRunnable1 != null) {
+                    mVideoDataDecodeRunnable1.isPlaying = false;
+                    mVideoDataDecodeRunnable1 = null;
+                }
                 sps_pps_portrait1 = null;
                 sps_pps_landscape1 = null;
                 break;
@@ -1503,8 +1507,10 @@ public class PlayerActivity extends AppCompatActivity {
                 mVideoDecoderMediaCodec2 = null;
                 mVideoDecoderMediaFormat2 = null;
                 mEDCallback2 = null;
-                mVideoDataDecodeRunnable2.isPlaying = false;
-                mVideoDataDecodeRunnable2 = null;
+                if (mVideoDataDecodeRunnable2 != null) {
+                    mVideoDataDecodeRunnable2.isPlaying = false;
+                    mVideoDataDecodeRunnable2 = null;
+                }
                 sps_pps_portrait2 = null;
                 sps_pps_landscape2 = null;
                 break;

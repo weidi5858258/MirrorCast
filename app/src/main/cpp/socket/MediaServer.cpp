@@ -37,20 +37,27 @@
 #define BACKLOG 1 // 2
 #define DATA_BUFFER 2073600 // 1920*1080
 
-extern char *mime1;
-extern char *codecName1;
+extern char mime1[];
+extern char codecName1[];
 extern int mimeLength1;
 extern int codecNameLength1;
 extern int width1;
 extern int height1;
 extern int orientation1;
-extern char *mime2;
-extern char *codecName2;
+extern bool isPlaying1;
+extern char mime2[];
+extern char codecName2[];
 extern int mimeLength2;
 extern int codecNameLength2;
 extern int width2;
 extern int height2;
 extern int orientation2;
+extern bool isPlaying2;
+
+extern pthread_mutex_t mutex1;
+extern pthread_cond_t cond1;
+extern pthread_mutex_t mutex2;
+extern pthread_cond_t cond2;
 
 extern void client_connect();
 
@@ -423,7 +430,7 @@ void *receive_data(void *arg) {
             break;
         }
         default:
-            return NULL;
+            return nullptr;
     }
     // endregion
 
@@ -447,8 +454,7 @@ void *receive_data(void *arg) {
         want_to_read_length = uint8tToInt(data_buffer);
         LOGI("receive_data() want_to_read_length: %d\n", want_to_read_length);
         if (want_to_read_length > 0) {
-            ret = read_data(
-                    client_sock_fd, want_to_read_length, temp_client_info, client_info);
+            ret = read_data(client_sock_fd, want_to_read_length, temp_client_info, client_info);
             LOGI("receive_data() ret: %d\n", ret);
             if (ret == EXIT_SUCCESS) {
                 switch (which_client) {
@@ -472,65 +478,70 @@ void *receive_data(void *arg) {
                 setData(DO_SOMETHING_CODE_Client_set_info,
                         which_client, client_info, want_to_read_length);
                 if (MEDIA_CODEC_GO_JNI) {
-                }
-                // ARS-AL00@@@@@video/hevc@@@@@1080@@@@@2244@@@@@1
-                // 需要知道开始投屏时的方向
-                int count = 0;
-                char *p = nullptr;
-                char *buff = nullptr;
-                buff = client_info;
-                p = strsep(&buff, "@@@@@");
-                while (p != nullptr) {
-                    size_t length = strlen(p);
-                    if (length > 0) {
-                        ++count;
-                        LOGI("receive_data() p: %s %d\n", p, length);
-                        if (count == 1) {
-                            // ARS-AL00
-                        } else if (count == 2) {
-                            // video/hevc
-                            char *name = findDecoderCodecName(
-                                    DO_SOMETHING_CODE_find_decoder_codec_name,
-                                    which_client, p, length);
-                            if (which_client == 1) {
-                                mimeLength1 = length;
-                                codecNameLength1 = strlen(name);
-                                memcpy(mime1, p, mimeLength1);
-                                memcpy(codecName1, name, codecNameLength1);
-                            } else if (which_client == 2) {
-                                mimeLength2 = length;
-                                codecNameLength2 = strlen(name);
-                                memcpy(mime2, p, mimeLength2);
-                                memcpy(codecName2, name, codecNameLength2);
-                            }
-                            LOGI("receive_data() codecName: %s\n", name);
-                        } else if (count == 3) {
-                            // 1080
-                            width = atoi(p);
-                            if (which_client == 1) {
-                                width1 = width;
-                            } else if (which_client == 2) {
-                                width2 = width;
-                            }
-                        } else if (count == 4) {
-                            // 2244
-                            height = atoi(p);
-                            if (which_client == 1) {
-                                height1 = height;
-                            } else if (which_client == 2) {
-                                height2 = height;
-                            }
-                        } else if (count == 5) {
-                            // 1
-                            orientation = atoi(p);
-                            if (which_client == 1) {
-                                orientation1 = orientation;
-                            } else if (which_client == 2) {
-                                orientation2 = orientation;
+                    // ARS-AL00@@@@@video/hevc@@@@@1080@@@@@2244@@@@@1
+                    // 需要知道开始投屏时的方向
+                    int count = 0;
+                    char *p = nullptr;
+                    char *buff = nullptr;
+                    buff = client_info;
+                    p = strsep(&buff, "@@@@@");
+                    while (p != nullptr) {
+                        size_t length = strlen(p);
+                        if (length > 0) {
+                            ++count;
+                            LOGI("receive_data() p: %s %d\n", p, length);
+                            if (count == 1) {
+                                // ARS-AL00
+                            } else if (count == 2) {
+                                // video/hevc
+                                char *name = findDecoderCodecName(
+                                        DO_SOMETHING_CODE_find_decoder_codec_name,
+                                        which_client, p, length);
+                                LOGI("receive_data() name: %s\n", name);
+                                if (which_client == 1) {
+                                    mimeLength1 = length;
+                                    codecNameLength1 = strlen(name);
+                                    memset(mime1, '\0', 50);
+                                    memset(codecName1, '\0', 50);
+                                    memcpy(mime1, p, mimeLength1);
+                                    memcpy(codecName1, name, codecNameLength1);
+                                } else if (which_client == 2) {
+                                    mimeLength2 = length;
+                                    codecNameLength2 = strlen(name);
+                                    memset(mime2, '\0', 50);
+                                    memset(codecName2, '\0', 50);
+                                    memcpy(mime2, p, mimeLength2);
+                                    memcpy(codecName2, name, codecNameLength2);
+                                }
+                                LOGI("receive_data() codecName: %s\n", name);
+                            } else if (count == 3) {
+                                // 1080
+                                width = atoi(p);
+                                if (which_client == 1) {
+                                    width1 = width;
+                                } else if (which_client == 2) {
+                                    width2 = width;
+                                }
+                            } else if (count == 4) {
+                                // 2244
+                                height = atoi(p);
+                                if (which_client == 1) {
+                                    height1 = height;
+                                } else if (which_client == 2) {
+                                    height2 = height;
+                                }
+                            } else if (count == 5) {
+                                // 1
+                                orientation = atoi(p);
+                                if (which_client == 1) {
+                                    orientation1 = orientation;
+                                } else if (which_client == 2) {
+                                    orientation2 = orientation;
+                                }
                             }
                         }
+                        p = strsep(&buff, "@@@@@");
                     }
-                    p = strsep(&buff, "@@@@@");
                 }
             }
         }
@@ -545,7 +556,7 @@ void *receive_data(void *arg) {
             want_to_read_length = uint8tToInt(data_buffer);
             ret = read_data(client_sock_fd, want_to_read_length, read_buffer, data_buffer);
             if (ret == EXIT_SUCCESS) {
-                set_sps_pps(which_client, orientation, data_buffer, want_to_read_length);
+                setSpsPps(which_client, orientation, data_buffer, want_to_read_length);
             }
         }
         // 第二个sps_pps
@@ -554,14 +565,23 @@ void *receive_data(void *arg) {
             want_to_read_length = uint8tToInt(data_buffer);
             ret = read_data(client_sock_fd, want_to_read_length, read_buffer, data_buffer);
             if (ret == EXIT_SUCCESS) {
-                set_sps_pps(which_client, orientation, data_buffer, want_to_read_length);
+                if (orientation == 1) {
+                    setSpsPps(which_client, 2, data_buffer, want_to_read_length);
+                } else {
+                    setSpsPps(which_client, 1, data_buffer, want_to_read_length);
+                }
             }
         }
 
+        setOrientation(which_client, orientation);
         createMediaCodec(which_client);
         createMediaFormat(which_client, orientation);
+        startMediaCodec(which_client, 0);
     }
     // endregion
+
+    //Alexander Test
+    //usleep(1000*1000*10);
 
     LOGI("receive_data() start which_client: %d\n", which_client);
     // region 读取数据
@@ -583,14 +603,14 @@ void *receive_data(void *arg) {
                     LOGI("receive_data() which_client: %d orientation: 1\n", which_client);
                     changeWindow(which_client, 1);
                     if (MEDIA_CODEC_GO_JNI) {
-                        set_orientation(which_client, 1);
+                        setOrientation(which_client, 1);
                     }
                     continue;
                 } else if (data_buffer[0] == 254) {
                     LOGI("receive_data() which_client: %d orientation: 2\n", which_client);
                     changeWindow(which_client, 2);
                     if (MEDIA_CODEC_GO_JNI) {
-                        set_orientation(which_client, 2);
+                        setOrientation(which_client, 2);
                     }
                     continue;
                 }
@@ -619,19 +639,24 @@ void *receive_data(void *arg) {
         case 1: {
             close_client_sock(&client_sock_fd1);
             if (MEDIA_CODEC_GO_JNI) {
-                free1();
+                isPlaying1 = false;
+                pthread_mutex_lock(&mutex1);
+                pthread_cond_signal(&cond1);
+                pthread_mutex_unlock(&mutex1);
             }
             break;
         }
         case 2: {
             close_client_sock(&client_sock_fd2);
             if (MEDIA_CODEC_GO_JNI) {
-                free2();
+                isPlaying2 = false;
+                pthread_mutex_lock(&mutex2);
+                pthread_cond_signal(&cond2);
+                pthread_mutex_unlock(&mutex2);
             }
             break;
         }
     }
-    LOGI("receive_data() which_client: %d client_sock_fd: %d\n", which_client, client_sock_fd);
 
     // 通知Java有设备断开连接了
     LOGI("receive_data() disconnect which_client: %d\n", which_client);

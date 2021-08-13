@@ -2,9 +2,11 @@
 // Created by root on 2021/8/11.
 //
 
+#include <pthread.h>
 #include <assert.h>
 #include <jni.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
 #include <sys/types.h>
@@ -14,6 +16,7 @@
 #include <limits.h>
 
 #include "include/Log.h"
+#include "MediaData.h"
 #include "MediaCodec.h"
 
 
@@ -35,6 +38,7 @@
 static int TIME_OUT = 10000;
 
 // window1
+static int which_client1 = 1;
 static ANativeWindow *surface1;
 static AMediaFormat *format1;
 static AMediaCodec *codec1;
@@ -45,7 +49,13 @@ int codecNameLength1 = 0;
 int width1 = 0;
 int height1 = 0;
 int orientation1 = 1;
+bool isPlaying1 = false;
+uint8_t *sps_pps_portrait1 = nullptr;
+uint8_t *sps_pps_landscape1 = nullptr;
+ssize_t sps_pps_size_portrait1 = 0;
+ssize_t sps_pps_size_landscape1 = 0;
 // window2
+static int which_client2 = 2;
 static ANativeWindow *surface2;
 static AMediaFormat *format2;
 static AMediaCodec *codec2;
@@ -56,17 +66,11 @@ int codecNameLength2 = 0;
 int width2 = 0;
 int height2 = 0;
 int orientation2 = 1;
-
-extern bool isPlaying1;
-extern uint8_t *sps_pps_portrait1;
-extern uint8_t *sps_pps_landscape1;
-extern ssize_t sps_pps_size_portrait1;
-extern ssize_t sps_pps_size_landscape1;
-extern bool isPlaying2;
-extern uint8_t *sps_pps_portrait2;
-extern uint8_t *sps_pps_landscape2;
-extern ssize_t sps_pps_size_portrait2;
-extern ssize_t sps_pps_size_landscape2;
+bool isPlaying2 = false;
+uint8_t *sps_pps_portrait2 = nullptr;
+uint8_t *sps_pps_landscape2 = nullptr;
+ssize_t sps_pps_size_portrait2 = 0;
+ssize_t sps_pps_size_landscape2 = 0;
 
 AMediaCodec *getCodec(int which_client) {
     if (which_client == 1) {
@@ -76,6 +80,37 @@ AMediaCodec *getCodec(int which_client) {
     }
 
     return nullptr;
+}
+
+void setSpsPps(int which_client, int orientation, unsigned char *sps_pps, ssize_t size) {
+    switch (which_client) {
+        case 1: {
+            if (orientation == 1) {
+                sps_pps_portrait1 = (uint8_t *) malloc(size);
+                memcpy(sps_pps_portrait1, sps_pps, size);
+                sps_pps_size_portrait1 = size;
+            } else {
+                sps_pps_landscape1 = (uint8_t *) malloc(size);
+                memcpy(sps_pps_landscape1, sps_pps, size);
+                sps_pps_size_landscape1 = size;
+            }
+            break;
+        }
+        case 2: {
+            if (orientation == 1) {
+                sps_pps_portrait2 = (uint8_t *) malloc(size);
+                memcpy(sps_pps_portrait2, sps_pps, size);
+                sps_pps_size_portrait2 = size;
+            } else {
+                sps_pps_landscape2 = (uint8_t *) malloc(size);
+                memcpy(sps_pps_landscape2, sps_pps, size);
+                sps_pps_size_landscape2 = size;
+            }
+            break;
+        }
+        default:
+            break;
+    }
 }
 
 void setSurface(int which_client, JNIEnv *env, jobject surface_obj) {
@@ -92,6 +127,8 @@ void setSurface(int which_client, JNIEnv *env, jobject surface_obj) {
         }
         surface2 = ANativeWindow_fromSurface(env, surface_obj);
     }
+
+    startMediaCodec(which_client, 0);
 }
 
 void createMediaCodec(int which_client) {
@@ -170,8 +207,12 @@ void createMediaFormat(int which_client, int orientation) {
     }
 }
 
-void start(int which_client, uint32_t flags) {
+void startMediaCodec(int which_client, uint32_t flags) {
+    LOGI("startMediaCodec() start which_client: %d", which_client);
     if (which_client == 1) {
+        if (isPlaying1) {
+            return;
+        }
         if (!codec1 || !format1 || !surface1) {
             return;
         }
@@ -179,6 +220,9 @@ void start(int which_client, uint32_t flags) {
         AMediaCodec_start(codec1);
         isPlaying1 = true;
     } else if (which_client == 2) {
+        if (isPlaying2) {
+            return;
+        }
         if (!codec2 || !format2 || !surface2) {
             return;
         }
@@ -187,7 +231,32 @@ void start(int which_client, uint32_t flags) {
         isPlaying2 = true;
     }
 
+    if (which_client == 1) {
+        if (!isPlaying1) {
+            return;
+        }
+    } else if (which_client == 2) {
+        if (!isPlaying2) {
+            return;
+        }
+    }
 
+    // 开启线程不断地读取数据
+    pthread_t p_tids_receive_data;
+    // 定义一个属性
+    pthread_attr_t attr;
+    sched_param param;
+    // 初始化属性值,均设为默认值
+    pthread_attr_init(&attr);
+    pthread_attr_getschedparam(&attr, &param);
+    pthread_attr_setschedparam(&attr, &param);
+    pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM);
+    if (which_client == 1) {
+        pthread_create(&p_tids_receive_data, &attr, startDecoder, &which_client1);
+    } else if (which_client == 2) {
+        pthread_create(&p_tids_receive_data, &attr, startDecoder, &which_client2);
+    }
+    LOGI("startMediaCodec() end   which_client: %d", which_client);
 }
 
 bool
@@ -205,18 +274,24 @@ feedInputBuffer(AMediaCodec *codec,
     if (room == nullptr) {
         return false;
     }
-    memcpy(room, data, (size_t) size);
+    memcpy(room, data, size);
     AMediaCodec_queueInputBuffer(codec, roomIndex, offset, size, time, flags);
     return true;
 }
 
 bool
-drainOutputBuffer(AMediaCodec *codec, bool render) {
+drainOutputBuffer(int which_client, AMediaCodec *codec, bool render) {
     AMediaCodecBufferInfo info;
     size_t out_size = 0;
     for (;;) {
-        if (!isPlaying1) {
-            break;
+        if (which_client == 1) {
+            if (!isPlaying1) {
+                break;
+            }
+        } else if (which_client == 2) {
+            if (!isPlaying2) {
+                break;
+            }
         }
 
         ssize_t roomIndex = AMediaCodec_dequeueOutputBuffer(codec, &info, TIME_OUT);
@@ -250,10 +325,10 @@ drainOutputBuffer(AMediaCodec *codec, bool render) {
             LOGI("info.flags 4: %d", info.flags);
         }
 
-        uint8_t *room = AMediaCodec_getOutputBuffer(codec, (size_t) roomIndex, &out_size);
+        /*uint8_t *room = AMediaCodec_getOutputBuffer(codec, (size_t) roomIndex, &out_size);
         if (room == nullptr) {
             return false;
-        }
+        }*/
 
         AMediaCodec_releaseOutputBuffer(codec, roomIndex, render);
     }
@@ -262,7 +337,8 @@ drainOutputBuffer(AMediaCodec *codec, bool render) {
 }
 
 bool
-feedInputBufferAndDrainOutputBuffer(AMediaCodec *codec,
+feedInputBufferAndDrainOutputBuffer(int which_client,
+                                    AMediaCodec *codec,
                                     unsigned char *data,
                                     off_t offset, size_t size,
                                     uint64_t time, uint32_t flags,
@@ -270,13 +346,14 @@ feedInputBufferAndDrainOutputBuffer(AMediaCodec *codec,
                                     bool needFeedInputBuffer) {
     if (needFeedInputBuffer) {
         return feedInputBuffer(codec, data, offset, size, time, flags) &&
-               drainOutputBuffer(codec, render);
+               drainOutputBuffer(which_client, codec, render);
     }
 
-    return drainOutputBuffer(codec, render);
+    return drainOutputBuffer(which_client, codec, render);
 }
 
 void release1() {
+    LOGI("release1() start\n");
     isPlaying1 = false;
     if (surface1) {
         ANativeWindow_release(surface1);
@@ -290,9 +367,23 @@ void release1() {
         AMediaCodec_delete(codec1);
         codec1 = nullptr;
     }
+    if (sps_pps_portrait1) {
+        free(sps_pps_portrait1);
+        sps_pps_portrait1 = nullptr;
+    }
+    if (sps_pps_landscape1) {
+        free(sps_pps_landscape1);
+        sps_pps_landscape1 = nullptr;
+    }
+    sps_pps_size_portrait1 = 0;
+    sps_pps_size_landscape1 = 0;
+    mimeLength1 = 0;
+    codecNameLength1 = 0;
+    LOGI("release1() end\n");
 }
 
 void release2() {
+    LOGI("release2() start\n");
     isPlaying2 = false;
     if (surface2) {
         ANativeWindow_release(surface2);
@@ -306,4 +397,17 @@ void release2() {
         AMediaCodec_delete(codec2);
         codec2 = nullptr;
     }
+    if (sps_pps_portrait2) {
+        free(sps_pps_portrait2);
+        sps_pps_portrait2 = nullptr;
+    }
+    if (sps_pps_landscape2) {
+        free(sps_pps_landscape2);
+        sps_pps_landscape2 = nullptr;
+    }
+    sps_pps_size_portrait2 = 0;
+    sps_pps_size_landscape2 = 0;
+    mimeLength2 = 0;
+    codecNameLength2 = 0;
+    LOGI("release2() end\n");
 }

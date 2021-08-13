@@ -15,19 +15,23 @@
 
 AMediaCodec *getCodec(int which_client);
 
+void setSpsPps(int which_client, int orientation, unsigned char *sps_pps, ssize_t size);
+
 void setSurface(int which_client, JNIEnv *env, jobject surface);
 
 void createMediaCodec(int which_client);
 
 void createMediaFormat(int which_client, int orientation);
 
-bool
-feedInputBufferAndDrainOutputBuffer(AMediaCodec *codec,
-                                    unsigned char *data,
-                                    off_t offset, size_t size,
-                                    uint64_t time, uint32_t flags,
-                                    bool render,
-                                    bool needFeedInputBuffer);
+void startMediaCodec(int which_client, uint32_t flags);
+
+bool feedInputBufferAndDrainOutputBuffer(int which_client,
+                                         AMediaCodec *codec,
+                                         unsigned char *data,
+                                         off_t offset, size_t size,
+                                         uint64_t time, uint32_t flags,
+                                         bool render,
+                                         bool needFeedInputBuffer);
 
 void release1();
 

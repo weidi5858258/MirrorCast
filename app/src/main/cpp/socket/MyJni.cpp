@@ -444,9 +444,11 @@ Java_com_weidi_mirrorcast_MyJni_onTransact(JNIEnv *env, jobject thiz,
             close_client(which_client);
             return env->NewStringUTF(ret);
         }
-        case DO_SOMETHING_CODE_set_surface:{
+        case DO_SOMETHING_CODE_set_surface: {
             jint which_client = env->GetIntField(jniObject, valueInt_jfieldID);
-
+            jobject surfaceObject = env->GetObjectField(jniObject, valueObject_jfieldID);
+            setSurface(which_client, env, surfaceObject);
+            env->DeleteLocalRef(surfaceObject);
             return env->NewStringUTF(ret);
         }
 
