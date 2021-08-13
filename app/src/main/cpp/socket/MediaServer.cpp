@@ -489,7 +489,7 @@ void *receive_data(void *arg) {
                         size_t length = strlen(p);
                         if (length > 0) {
                             ++count;
-                            LOGI("receive_data() p: %s %d\n", p, length);
+                            LOGI("receive_data() : %s\n", p);
                             if (count == 1) {
                                 // ARS-AL00
                             } else if (count == 2) {
@@ -497,7 +497,7 @@ void *receive_data(void *arg) {
                                 char *name = findDecoderCodecName(
                                         DO_SOMETHING_CODE_find_decoder_codec_name,
                                         which_client, p, length);
-                                LOGI("receive_data() name: %s\n", name);
+                                LOGI("receive_data()              name: %s\n", name);
                                 if (which_client == 1) {
                                     mimeLength1 = length;
                                     codecNameLength1 = strlen(name);
@@ -513,7 +513,7 @@ void *receive_data(void *arg) {
                                     memcpy(mime2, p, mimeLength2);
                                     memcpy(codecName2, name, codecNameLength2);
                                 }
-                                LOGI("receive_data() codecName: %s\n", name);
+                                LOGI("receive_data()         codecName: %s\n", name);
                             } else if (count == 3) {
                                 // 1080
                                 width = atoi(p);
@@ -674,6 +674,16 @@ void server_close() {
 void close_all_clients() {
     close_client_sock(&client_sock_fd1);
     close_client_sock(&client_sock_fd2);
+    if (MEDIA_CODEC_GO_JNI) {
+        isPlaying1 = false;
+        pthread_mutex_lock(&mutex1);
+        pthread_cond_signal(&cond1);
+        pthread_mutex_unlock(&mutex1);
+        isPlaying2 = false;
+        pthread_mutex_lock(&mutex2);
+        pthread_cond_signal(&cond2);
+        pthread_mutex_unlock(&mutex2);
+    }
 }
 
 void close_client(int which_client) {

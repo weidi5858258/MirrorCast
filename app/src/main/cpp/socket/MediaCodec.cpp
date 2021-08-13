@@ -72,6 +72,148 @@ uint8_t *sps_pps_landscape2 = nullptr;
 ssize_t sps_pps_size_portrait2 = 0;
 ssize_t sps_pps_size_landscape2 = 0;
 
+int handleSpsPps(AMediaFormat *pFormat, uint8_t *sps_pps, ssize_t size) {
+    // unknow
+    static int MARK0 = 0;
+    // 0 0 0 1
+    static int MARK1 = 1;
+    //   0 0 1
+    static int MARK2 = 2;
+    // ... 103 ... 104 ...
+    static int MARK3 = 3;
+    // ...  39 ... 40 ...
+    static int MARK4 = 4;
+
+    uint8_t *sps = nullptr;
+    uint8_t *pps = nullptr;
+    size_t sps_size = 0;
+    size_t pps_size = 0;
+    int mark = MARK0;
+    int index = -1;
+    if (sps_pps[0] == 0
+        && sps_pps[1] == 0
+        && sps_pps[2] == 0
+        && sps_pps[3] == 1) {
+        // region 0 0 0 1 ... 0 0 0 1 ...
+        for (int i = 1; i < size; i++) {
+            if (sps_pps[i] == 0
+                && sps_pps[i + 1] == 0
+                && sps_pps[i + 2] == 0
+                && sps_pps[i + 3] == 1) {
+                index = i;
+                mark = MARK1;
+                break;
+            }
+        }
+        // endregion
+    } else if (sps_pps[0] == 0
+               && sps_pps[1] == 0
+               && sps_pps[2] == 1) {
+        // region 0 0 1 ... 0 0 1 ...
+        for (int i = 1; i < size; i++) {
+            if (sps_pps[i] == 0
+                && sps_pps[i + 1] == 0
+                && sps_pps[i + 2] == 1) {
+                index = i;
+                mark = MARK2;
+                break;
+            }
+        }
+        // endregion
+    }
+
+    if (index != -1) {
+        // region
+        sps_size = index;
+        pps_size = size - index;
+        sps = (uint8_t *) malloc(sps_size);
+        pps = (uint8_t *) malloc(pps_size);
+        memset(sps, 0, sps_size);
+        memset(pps, 0, pps_size);
+        memcpy(sps, sps_pps, sps_size);
+        memcpy(pps, sps_pps + index, pps_size);
+        // endregion
+    } else {
+        // region ... 103 ... 104 ...
+        mark = MARK3;
+        int spsIndex = -1;
+        int spsLength = 0;
+        int ppsIndex = -1;
+        int ppsLength = 0;
+        for (int i = 0; i < size; i++) {
+            if (sps_pps[i] == 103) {
+                // 0x67 = 103
+                if (spsIndex == -1) {
+                    spsIndex = i;
+                    spsLength = sps_pps[i - 1];
+                    if (spsLength <= 0) {
+                        spsIndex = -1;
+                    }
+                }
+            } else if (sps_pps[i] == 104) {
+                // 103后面可能有2个或多个104
+                // 0x68 = 104
+                ppsIndex = i;
+                ppsLength = sps_pps[i - 1];
+            }
+        }
+        // endregion
+
+        // region ... 39 ... 40 ...
+        if (spsIndex == -1 || ppsIndex == -1) {
+            mark = MARK4;
+            spsIndex = -1;
+            spsLength = 0;
+            ppsIndex = -1;
+            ppsLength = 0;
+            for (int i = 0; i < size; i++) {
+                if (sps_pps[i] == 39) {
+                    if (spsIndex == -1) {
+                        spsIndex = i;
+                        spsLength = sps_pps[i - 1];
+                        if (spsLength <= 0) {
+                            spsIndex = -1;
+                        }
+                    }
+                } else if (sps_pps[i] == 40) {
+                    ppsIndex = i;
+                    ppsLength = sps_pps[i - 1];
+                }
+            }
+        }
+        // endregion
+
+        // region
+        if (spsIndex != -1 && ppsIndex != -1) {
+            sps_size = spsLength;
+            pps_size = ppsLength;
+            sps = (uint8_t *) malloc(spsLength + 4);
+            pps = (uint8_t *) malloc(ppsLength + 4);
+            memset(sps, 0, spsLength + 4);
+            memset(pps, 0, ppsLength + 4);
+
+            // 0x00, 0x00, 0x00, 0x01
+            sps[0] = pps[0] = 0;
+            sps[1] = pps[1] = 0;
+            sps[2] = pps[2] = 0;
+            sps[3] = pps[3] = 1;
+            memcpy(sps + 4, sps_pps + spsIndex, spsLength);
+            memcpy(pps + 4, sps_pps + ppsIndex, ppsLength);
+        }
+        // endregion
+    }
+
+    if (sps != nullptr && pps != nullptr) {
+        AMediaFormat_setBuffer(pFormat, "csd-0", sps, sps_size);
+        AMediaFormat_setBuffer(pFormat, "csd-1", pps, pps_size);
+    } else {
+        // 实在找不到sps和pps的数据了
+        mark = MARK0;
+    }
+
+    return mark;
+}
+
 AMediaCodec *getCodec(int which_client) {
     if (which_client == 1) {
         return codec1;
@@ -189,7 +331,23 @@ void createMediaFormat(int which_client, int orientation) {
             }
         }
     } else if (strcmp(mime, "video/avc") == 0) {
-
+        int mark = 0;
+        if (which_client == 1) {
+            if (orientation == 1) {
+                mark = handleSpsPps(pFormat, sps_pps_portrait1, sps_pps_size_portrait1);
+            } else {
+                mark = handleSpsPps(pFormat, sps_pps_landscape1, sps_pps_size_landscape1);
+            }
+        } else if (which_client == 2) {
+            if (orientation == 1) {
+                mark = handleSpsPps(pFormat, sps_pps_portrait2, sps_pps_size_portrait2);
+            } else {
+                mark = handleSpsPps(pFormat, sps_pps_landscape2, sps_pps_size_landscape2);
+            }
+        }
+        if (mark == 0) {
+            LOGE("createMediaFormat() video/avc 找不到相关的sps pps数据");
+        }
     }
 
     if (which_client == 1) {
@@ -315,9 +473,9 @@ drainOutputBuffer(int which_client, AMediaCodec *codec, bool render) {
             break;
         }
 
-        if (info.flags & 1) {
-            LOGI("info.flags 1: %d", info.flags);
-        }
+        /*if (info.flags & 1) {
+            LOGI("info.flags 1: %d", info.flags);// 关键帧
+        }*/
         if (info.flags & 2) {
             LOGI("info.flags 2: %d", info.flags);
         }

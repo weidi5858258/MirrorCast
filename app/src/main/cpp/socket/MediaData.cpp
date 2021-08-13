@@ -43,7 +43,91 @@ extern ssize_t sps_pps_size_portrait2;
 extern ssize_t sps_pps_size_landscape2;
 
 void drainFrame(std::list<Data *> *list) {
-
+    size_t size1 = list->size();
+    /*if (size1 >= 5) {
+    }*/
+    bool firstKeyFrame = false;
+    int count = 0;
+    for (auto &data:*list) {
+        ++count;
+        firstKeyFrame = ((data->data[data->size - 1] & 1) != 0);// 关键帧
+        if (firstKeyFrame) {
+            break;
+        }
+    }
+    if (firstKeyFrame && count > 1) {
+        //LOGE("drainFrame() size 1: %d", size1);
+        // 先丢一次
+        /*std::list<Data *>::iterator iter;
+        for (iter = list->begin(); iter != list->end(); iter++) {
+            Data *data = *iter;
+            LOGI("drainFrame() data: %d", (data->data[data->size - 1]));
+            if ((data->data[data->size - 1] & 1) == 0) {
+                // 非关键帧
+                if (data->data != nullptr) {
+                    free(data->data);
+                    data->data = nullptr;
+                }
+                free(&data);
+                data = nullptr;
+                iter = list->erase(iter);// 错误代码
+            } else {
+                break;
+            }
+        }*/
+        for (;;) {
+            Data *data = list->front();
+            if ((data->data[data->size - 1] & 1) == 0) {
+                // 非关键帧
+                list->pop_front();
+                if (data->data != nullptr) {
+                    free(data->data);
+                    data->data = nullptr;
+                }
+                free(data);
+                data = nullptr;
+            } else {
+                break;
+            }
+        }
+        size_t size2 = list->size();
+        //LOGI("drainFrame() size 2: %d", size2);
+        // 再丢一次
+        if (/*size2 >= 5 && */size1 > size2) {
+            bool secondKeyFrame = false;
+            for (auto &data:*list) {
+                firstKeyFrame = ((data->data[data->size - 1] & 1) != 0);
+                if (firstKeyFrame && secondKeyFrame) {
+                    break;
+                } else if (firstKeyFrame) {
+                    secondKeyFrame = true;
+                }
+            }
+            if (firstKeyFrame && secondKeyFrame) {
+                secondKeyFrame = false;
+                for (;;) {
+                    Data *data = list->front();
+                    if ((data->data[data->size - 1] & 1) == 0) {
+                        // 非关键帧
+                        list->pop_front();
+                        if (data->data != nullptr) {
+                            free(data->data);
+                            data->data = nullptr;
+                        }
+                        free(data);
+                        data = nullptr;
+                    } else {
+                        if (secondKeyFrame) {
+                            break;
+                        }
+                        secondKeyFrame = true;
+                    }
+                }
+                size_t size3 = list->size();
+                //LOGD("drainFrame() size 3: %d", size3);
+            }
+        }
+    }
 }
 
 void setOrientation(int which_client, int orientation) {

@@ -1209,7 +1209,7 @@ public class MainActivity extends BaseActivity {
 
                 public void onCapabilitiesChanged(Network network,
                                                   NetworkCapabilities networkCapabilities) {
-                    Log.i(TAG, "onCapabilitiesChanged()");
+                    //Log.i(TAG, "onCapabilitiesChanged()");
                 }
 
                 public void onLinkPropertiesChanged(Network network,

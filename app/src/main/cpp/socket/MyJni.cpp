@@ -182,7 +182,8 @@ char *findDecoderCodecName(int code, int which_client, const char *data, ssize_t
     jstring codecNameStr =
             static_cast<jstring>(jniEnv->GetObjectField(jniObject, valueString_jfieldID));
     const char *codecName = jniEnv->GetStringUTFChars(codecNameStr, 0);
-    size_t length = strlen(codecName);
+    size_t length = strlen(codecName) + 1;// 千万注意,一定要加1
+    LOGI("findDecoderCodecName() codecName: %s length: %d\n", codecName, length);
     char tmpStr[length];
     memcpy(tmpStr, codecName, length);
     jniEnv->ReleaseStringUTFChars(codecNameStr, codecName);

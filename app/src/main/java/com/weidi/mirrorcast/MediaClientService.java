@@ -391,12 +391,12 @@ public class MediaClientService extends Service {
         mIsConnected = false;
 
         if (TextUtils.isEmpty(mVideoEncoderCodecName)) {
-            mVideoEncoderCodecName = findEncoderCodecName(MediaFormat.MIMETYPE_VIDEO_HEVC);
-            mVideoMime = MediaFormat.MIMETYPE_VIDEO_HEVC;
-        }
-        if (TextUtils.isEmpty(mVideoEncoderCodecName)) {
             mVideoEncoderCodecName = findEncoderCodecName(MediaFormat.MIMETYPE_VIDEO_AVC);
             mVideoMime = MediaFormat.MIMETYPE_VIDEO_AVC;
+        }
+        if (TextUtils.isEmpty(mVideoEncoderCodecName)) {
+            mVideoEncoderCodecName = findEncoderCodecName(MediaFormat.MIMETYPE_VIDEO_HEVC);
+            mVideoMime = MediaFormat.MIMETYPE_VIDEO_HEVC;
         }
         if (TextUtils.isEmpty(mVideoEncoderCodecName)) {
             Log.e(TAG, "prepare() mVideoEncoderCodecName is null");
