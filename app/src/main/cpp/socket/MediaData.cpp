@@ -42,10 +42,8 @@ extern uint8_t *sps_pps_landscape2;
 extern ssize_t sps_pps_size_portrait2;
 extern ssize_t sps_pps_size_landscape2;
 
-void drainFrame(std::list<Data *> *list) {
+static void drainFrame(std::list<Data *> *list) {
     size_t size1 = list->size();
-    /*if (size1 >= 5) {
-    }*/
     bool firstKeyFrame = false;
     int count = 0;
     for (auto &data:*list) {
@@ -58,23 +56,6 @@ void drainFrame(std::list<Data *> *list) {
     if (firstKeyFrame && count > 1) {
         //LOGE("drainFrame() size 1: %d", size1);
         // 先丢一次
-        /*std::list<Data *>::iterator iter;
-        for (iter = list->begin(); iter != list->end(); iter++) {
-            Data *data = *iter;
-            LOGI("drainFrame() data: %d", (data->data[data->size - 1]));
-            if ((data->data[data->size - 1] & 1) == 0) {
-                // 非关键帧
-                if (data->data != nullptr) {
-                    free(data->data);
-                    data->data = nullptr;
-                }
-                free(&data);
-                data = nullptr;
-                iter = list->erase(iter);// 错误代码
-            } else {
-                break;
-            }
-        }*/
         for (;;) {
             Data *data = list->front();
             if ((data->data[data->size - 1] & 1) == 0) {
@@ -192,7 +173,7 @@ void putData(int which_client, unsigned char *encodedData, ssize_t size) {
     }
 }
 
-Data *getData(int which_client) {
+static Data *getData(int which_client) {
     Data *data = nullptr;
     size_t size = 0;
     switch (which_client) {
