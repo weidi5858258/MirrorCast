@@ -39,6 +39,7 @@
 
 static int TIME_OUT = 10000;
 
+bool ONLY_OUTPUT_KEY_FRAME = false;
 bool isRecording = false;
 
 // window1 或者 竖屏参数
@@ -337,21 +338,7 @@ static void sendData(uint8_t *data_buffer, ssize_t length) {
     pthread_mutex_unlock(&mutex1);
 }
 
-static void handleOutputBuffer(uint8_t *room, AMediaCodecBufferInfo roomInfo, bool isPortrait) {
-    if (room == nullptr) {
-        return;
-    }
-
-    /*if (roomInfo.flags & 1) {
-        LOGI("handleOutputBuffer() roomInfo.flags 1: %d", roomInfo.flags);// 关键帧
-    }
-    if (roomInfo.flags & 2) {
-        LOGI("handleOutputBuffer() roomInfo.flags 2: %d", roomInfo.flags);
-    }
-    if (roomInfo.flags & 4) {
-        LOGI("handleOutputBuffer() roomInfo.flags 4: %d", roomInfo.flags);// 结束帧
-    }*/
-
+static void handleOutputBufferImpl(uint8_t *room, AMediaCodecBufferInfo roomInfo, bool isPortrait) {
     uint8_t *frame = (uint8_t *) malloc(roomInfo.size + 6);
     memset(frame, 0, roomInfo.size + 6);
     int2Bytes(frame, roomInfo.size + 2);
@@ -399,6 +386,28 @@ static void handleOutputBuffer(uint8_t *room, AMediaCodecBufferInfo roomInfo, bo
     sendData(frame, roomInfo.size + 6);
     free(frame);
     frame = nullptr;
+}
+
+static void handleOutputBuffer(uint8_t *room, AMediaCodecBufferInfo roomInfo, bool isPortrait) {
+    if (room == nullptr) {
+        return;
+    }
+
+    if (roomInfo.flags & 1) {
+        //LOGI("handleOutputBuffer() roomInfo.flags 1: %d", roomInfo.flags);// 关键帧
+        if (ONLY_OUTPUT_KEY_FRAME) {
+            handleOutputBufferImpl(room, roomInfo, isPortrait);
+            return;
+        }
+    }
+    /*if (roomInfo.flags & 2) {
+        LOGI("handleOutputBuffer() roomInfo.flags 2: %d", roomInfo.flags);// 配置帧
+    }*/
+    /*if (roomInfo.flags & 4) {
+        LOGI("handleOutputBuffer() roomInfo.flags 4: %d", roomInfo.flags);// 结束帧
+    }*/
+
+    handleOutputBufferImpl(room, roomInfo, isPortrait);
 }
 
 AMediaCodec *getCodec(int which_client) {

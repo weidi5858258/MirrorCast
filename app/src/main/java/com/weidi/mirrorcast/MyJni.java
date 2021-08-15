@@ -86,6 +86,7 @@ public class MyJni {
     public static final int DO_SOMETHING_CODE_fromPortraitToLandscape = 1016;
     public static final int DO_SOMETHING_CODE_fromLandscapeToPortrait = 1017;
     public static final int DO_SOMETHING_CODE_release_sps_pps = 1018;
+    public static final int DO_SOMETHING_CODE_only_output_key_frame = 1019;
 
     // jni ---> java
     public static final int DO_SOMETHING_CODE_connected = 2000;

@@ -68,6 +68,7 @@ import static com.weidi.mirrorcast.Constants.START_RECORD_SCREEN;
 import static com.weidi.mirrorcast.Constants.STOP_RECORD_SCREEN;
 import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_get_server_port;
 import static com.weidi.mirrorcast.MyJni.DECODER_MEDIA_CODEC_GO_JNI;
+import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_only_output_key_frame;
 import static com.weidi.mirrorcast.PlayerActivity.MAXIMUM_NUMBER;
 import static com.weidi.mirrorcast.PlayerActivity.PLAYER_ACTIVITY_IS_LIVE;
 
@@ -262,10 +263,11 @@ public class MainActivity extends BaseActivity {
     private static final int MSG_UI_CLICK_BTN4 = 0x0010;
     private static final int MSG_UI_CLICK_BTN5 = 0x0011;
     private static final int MSG_UI_CLICK_BTN6 = 0x0012;
-    private static final int INTERNAL_ON_RESUME = 0x0013;
-    private static final int ON_CONNECTION_INFO_AVAILABLE = 0x0014;
-    private static final int ON_PEERS_AVAILABLE = 0x0015;
-    private static final int DISCOVER = 0x0016;
+    private static final int MSG_UI_CLICK_BTN7 = 0x0013;
+    private static final int INTERNAL_ON_RESUME = 0x0014;
+    private static final int ON_CONNECTION_INFO_AVAILABLE = 0x0015;
+    private static final int ON_PEERS_AVAILABLE = 0x0016;
+    private static final int DISCOVER = 0x0017;
 
     private TextView mTitleView;
     private EditText mIpET;
@@ -276,6 +278,7 @@ public class MainActivity extends BaseActivity {
     private Button mBtn4;
     private Button mBtn5;
     private Button mBtn6;
+    private Button mBtn7;
     private TextView mTv0;
     private TextView mTv1;
     private TextView mTv2;
@@ -321,6 +324,7 @@ public class MainActivity extends BaseActivity {
         mBtn4 = findViewById(R.id.btn4);
         mBtn5 = findViewById(R.id.btn5);
         mBtn6 = findViewById(R.id.btn6);
+        mBtn7 = findViewById(R.id.btn7);
         mTv0 = findViewById(R.id.tv0);
         mTv1 = findViewById(R.id.tv1);
         mTv2 = findViewById(R.id.tv2);
@@ -337,6 +341,7 @@ public class MainActivity extends BaseActivity {
         mBtn4.setOnClickListener(mOnClickListener);
         mBtn5.setOnClickListener(mOnClickListener);
         mBtn6.setOnClickListener(mOnClickListener);
+        mBtn7.setOnClickListener(mOnClickListener);
         mTv0.setOnClickListener(mOnClickListener);
         mTv1.setOnClickListener(mOnClickListener);
         mTv2.setOnClickListener(mOnClickListener);
@@ -462,15 +467,17 @@ public class MainActivity extends BaseActivity {
             mBtn4.setVisibility(View.GONE);
             mBtn5.setVisibility(View.GONE);
             mBtn6.setVisibility(View.GONE);
+            mBtn7.setVisibility(View.GONE);
             hideAllWifiP2pDevice();
             mBtn1.setText("作为服务端");
             mBtn2.setText("作为客户端");
         } else if (mIsServerLive) {
             mBtn1.setVisibility(View.VISIBLE);
-            mBtn6.setVisibility(View.VISIBLE);
+            mBtn7.setVisibility(View.VISIBLE);
             mBtn2.setVisibility(View.GONE);
             mBtn4.setVisibility(View.GONE);
             mBtn5.setVisibility(View.GONE);
+            mBtn6.setVisibility(View.GONE);
             mIpET.setVisibility(View.GONE);
             mPortET.setVisibility(View.GONE);
             mBtn1.setText("停用服务端");
@@ -488,7 +495,8 @@ public class MainActivity extends BaseActivity {
             mBtn2.setVisibility(View.VISIBLE);
             mBtn4.setVisibility(View.VISIBLE);
             mBtn5.setVisibility(View.VISIBLE);
-            mBtn6.setVisibility(View.GONE);
+            mBtn6.setVisibility(View.VISIBLE);
+            mBtn7.setVisibility(View.GONE);
             mBtn1.setText("停用客户端");
             Object object = EventBusUtils.post(
                     MediaClientService.class, IS_RECORDING, null);
@@ -506,9 +514,10 @@ public class MainActivity extends BaseActivity {
         }
         mTitleView.setText(info);
         mBtn3.setText("去后台");
-        mBtn4.setText("P2P扫描");
-        mBtn5.setText("P2P断开");
-        mBtn6.setText("Wifi Direct");
+        mBtn4.setText("关键帧");
+        mBtn5.setText("P2P扫描");
+        mBtn6.setText("P2P断开");
+        mBtn7.setText("Wifi Direct");
 
         EventBusUtils.post(
                 MediaClientService.class, ACCELEROMETER_ROTATION, null);
@@ -602,6 +611,11 @@ public class MainActivity extends BaseActivity {
             case R.id.btn6: {
                 mUiHandler.removeMessages(MSG_UI_CLICK_BTN6);
                 mUiHandler.sendEmptyMessageDelayed(MSG_UI_CLICK_BTN6, 500);
+                break;
+            }
+            case R.id.btn7: {
+                mUiHandler.removeMessages(MSG_UI_CLICK_BTN7);
+                mUiHandler.sendEmptyMessageDelayed(MSG_UI_CLICK_BTN7, 500);
                 break;
             }
             case R.id.tv0: {
@@ -884,12 +898,22 @@ public class MainActivity extends BaseActivity {
                 break;
             }
             case MSG_UI_CLICK_BTN4: {
+                JniObject jniObject = JniObject.obtain();
+                MyJni.getDefault().onTransact(DO_SOMETHING_CODE_only_output_key_frame, jniObject);
+                Toast.makeText(
+                        MainActivity.this,
+                        String.valueOf(jniObject.valueBoolean),
+                        Toast.LENGTH_SHORT).show();
+                jniObject = null;
+                break;
+            }
+            case MSG_UI_CLICK_BTN5: {
                 WifiP2PHelper.getInstance(getApplicationContext()).discover();
                 mUiHandler.removeMessages(INTERNAL_ON_RESUME);
                 mUiHandler.sendEmptyMessageDelayed(INTERNAL_ON_RESUME, 1000);
                 break;
             }
-            case MSG_UI_CLICK_BTN5: {
+            case MSG_UI_CLICK_BTN6: {
                 WifiP2PHelper.getInstance(getApplicationContext()).cancelConnect();
                 WifiP2PHelper.getInstance(getApplicationContext()).removeGroup();
                 hideAllWifiP2pDevice();
@@ -897,7 +921,7 @@ public class MainActivity extends BaseActivity {
                 mUiHandler.sendEmptyMessageDelayed(INTERNAL_ON_RESUME, 1000);
                 break;
             }
-            case MSG_UI_CLICK_BTN6: {
+            case MSG_UI_CLICK_BTN7: {
                 try {
                     /*if (ActivityCompat.checkSelfPermission(MainActivity.this,
                             Manifest.permission.ACCESS_FINE_LOCATION) !=

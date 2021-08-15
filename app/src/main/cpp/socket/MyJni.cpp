@@ -55,6 +55,7 @@ extern int what_is_device;
 extern int MAXIMUM_NUMBER;
 extern bool MEDIA_CODEC_GO_JNI;
 extern bool isRecording;
+extern bool ONLY_OUTPUT_KEY_FRAME;
 
 /***
  called at the library loaded.
@@ -567,6 +568,13 @@ Java_com_weidi_mirrorcast_MyJni_onTransact(JNIEnv *env, jobject thiz,
         }
         case DO_SOMETHING_CODE_release_sps_pps: {
             stopRecordScreen(true);
+            return env->NewStringUTF(ret);
+        }
+        case DO_SOMETHING_CODE_only_output_key_frame: {
+            ONLY_OUTPUT_KEY_FRAME = !ONLY_OUTPUT_KEY_FRAME;
+            LOGI("DO_SOMETHING_CODE_only_output_key_frame ONLY_OUTPUT_KEY_FRAME: %d",
+                 ONLY_OUTPUT_KEY_FRAME);
+            env->SetBooleanField(jniObject, valueBoolean_jfieldID, ONLY_OUTPUT_KEY_FRAME);
             return env->NewStringUTF(ret);
         }
 

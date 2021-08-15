@@ -37,6 +37,7 @@ enum DO_SOMETHING_CODE {
     DO_SOMETHING_CODE_fromPortraitToLandscape = 1016,
     DO_SOMETHING_CODE_fromLandscapeToPortrait = 1017,
     DO_SOMETHING_CODE_release_sps_pps = 1018,
+    DO_SOMETHING_CODE_only_output_key_frame = 1019,
 
     // jni ---> java
     DO_SOMETHING_CODE_connected = 2000,
