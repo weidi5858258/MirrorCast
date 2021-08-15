@@ -393,12 +393,12 @@ static void handleOutputBuffer(uint8_t *room, AMediaCodecBufferInfo roomInfo, bo
         return;
     }
 
-    if (roomInfo.flags & 1) {
-        //LOGI("handleOutputBuffer() roomInfo.flags 1: %d", roomInfo.flags);// 关键帧
-        if (ONLY_OUTPUT_KEY_FRAME) {
+    if (ONLY_OUTPUT_KEY_FRAME) {// 效果不理想
+        if (roomInfo.flags & 1) {
+            //LOGI("handleOutputBuffer() roomInfo.flags 1: %d", roomInfo.flags);// 关键帧
             handleOutputBufferImpl(room, roomInfo, isPortrait);
-            return;
         }
+        return;
     }
     /*if (roomInfo.flags & 2) {
         LOGI("handleOutputBuffer() roomInfo.flags 2: %d", roomInfo.flags);// 配置帧

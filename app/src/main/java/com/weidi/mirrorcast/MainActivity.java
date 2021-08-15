@@ -514,6 +514,7 @@ public class MainActivity extends BaseActivity {
         }
         mTitleView.setText(info);
         mBtn3.setText("去后台");
+        mBtn4.setVisibility(View.GONE);// 效果不理想,不展示
         mBtn4.setText("关键帧");
         mBtn5.setText("P2P扫描");
         mBtn6.setText("P2P断开");
