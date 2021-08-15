@@ -8,6 +8,7 @@ import android.media.MediaCodecInfo;
 import android.text.TextUtils;
 import android.util.Log;
 
+import java.util.Arrays;
 import java.util.Iterator;
 import java.util.concurrent.ArrayBlockingQueue;
 
@@ -78,12 +79,25 @@ public class MyJni {
     public static final int DO_SOMETHING_CODE_close_all_clients = 1009;
     public static final int DO_SOMETHING_CODE_close_one_client = 1010;
     public static final int DO_SOMETHING_CODE_set_surface = 1011;
+    public static final int DO_SOMETHING_CODE_start_record_screen_prepare = 1012;
+    public static final int DO_SOMETHING_CODE_start_record_screen = 1013;
+    public static final int DO_SOMETHING_CODE_is_recording = 1014;
+    public static final int DO_SOMETHING_CODE_stop_record_screen = 1015;
+    public static final int DO_SOMETHING_CODE_fromPortraitToLandscape = 1016;
+    public static final int DO_SOMETHING_CODE_fromLandscapeToPortrait = 1017;
+    public static final int DO_SOMETHING_CODE_release_sps_pps = 1018;
 
     // jni ---> java
     public static final int DO_SOMETHING_CODE_connected = 2000;
     public static final int DO_SOMETHING_CODE_disconnected = 2001;
     public static final int DO_SOMETHING_CODE_change_window = 2002;
     public static final int DO_SOMETHING_CODE_find_decoder_codec_name = 2003;
+    public static final int DO_SOMETHING_CODE_find_createPortraitVirtualDisplay = 2004;
+    public static final int DO_SOMETHING_CODE_find_createLandscapeVirtualDisplay = 2005;
+    public static final int DO_SOMETHING_CODE_find_encoder_send_data_error = 2006;
+
+    public static final boolean ENCODER_MEDIA_CODEC_GO_JNI = true;
+    public static final boolean DECODER_MEDIA_CODEC_GO_JNI = true;
 
     private Context mContext;
     private static final int QUEUE_LENGTH = 50;
@@ -339,6 +353,21 @@ public class MyJni {
                         codecName);
                 break;
             }
+            case DO_SOMETHING_CODE_find_createPortraitVirtualDisplay: {
+                EventBusUtils.post(MediaClientService.class,
+                        DO_SOMETHING_CODE_find_createPortraitVirtualDisplay, null);
+                break;
+            }
+            case DO_SOMETHING_CODE_find_createLandscapeVirtualDisplay: {
+                EventBusUtils.post(MediaClientService.class,
+                        DO_SOMETHING_CODE_find_createLandscapeVirtualDisplay, null);
+                break;
+            }
+            case DO_SOMETHING_CODE_find_encoder_send_data_error: {
+                EventBusUtils.post(MediaClientService.class,
+                        DO_SOMETHING_CODE_find_encoder_send_data_error, null);
+                break;
+            }
             default:
                 break;
         }
@@ -404,15 +433,17 @@ public class MyJni {
 
     private void drainFrame(ArrayBlockingQueue<byte[]> queue, long takeCount) {
         int size1 = queue.size();
-        if (size1 >= 5 && takeCount >= 10) {
+        if (/*size1 >= 5 && */takeCount >= 10) {
             boolean firstKeyFrame = false;
+            int count = 0;
             for (byte[] frame : queue) {
+                ++count;
                 firstKeyFrame = ((frame[frame.length - 1] & MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0);
                 if (firstKeyFrame) {
                     break;
                 }
             }
-            if (firstKeyFrame) {
+            if (firstKeyFrame && count > 1) {
                 //Log.e(TAG, "drainFrame() size 1: " + size1);
                 Iterator<byte[]> iterator = queue.iterator();
                 while (iterator.hasNext()) {
@@ -425,7 +456,7 @@ public class MyJni {
                 }
                 int size2 = queue.size();
                 //Log.i(TAG, "drainFrame() size 2: " + size2);
-                if (size2 >= 5 && size1 > size2) {
+                if (/*size2 >= 5 && */size1 > size2) {
                     boolean secondKeyFrame = false;
                     for (byte[] frame : queue) {
                         firstKeyFrame =

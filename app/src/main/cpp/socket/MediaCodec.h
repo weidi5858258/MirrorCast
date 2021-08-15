@@ -33,8 +33,28 @@ bool feedInputBufferAndDrainOutputBuffer(int which_client,
                                          bool render,
                                          bool needFeedInputBuffer);
 
-void release1();
+void release1(bool isDecoder);
 
-void release2();
+void release2(bool isDecoder);
+
+void createEncoderMediaFormat(const char *mime,
+                              int orientation,
+                              int width, int height);
+
+void createEncoderMediaCodec(const char *codec_name);
+
+void createEncoderSurface();
+
+ANativeWindow *getSurface(int orientation);
+
+void startEncoderMediaCodec();
+
+void fromPortraitToLandscape();
+
+void fromLandscapeToPortrait();
+
+void startRecordScreen();
+
+void stopRecordScreen(bool needToRelease);
 
 #endif //MIRRORCAST_MEDIACODEC_H

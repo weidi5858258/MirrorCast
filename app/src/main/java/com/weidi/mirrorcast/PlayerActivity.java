@@ -27,6 +27,7 @@ import java.util.Arrays;
 import androidx.appcompat.app.AppCompatActivity;
 
 import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_set_surface;
+import static com.weidi.mirrorcast.MyJni.DECODER_MEDIA_CODEC_GO_JNI;
 
 public class PlayerActivity extends AppCompatActivity {
 
@@ -156,8 +157,6 @@ public class PlayerActivity extends AppCompatActivity {
     private static final int MSG_UI_SURFACE_DESTROYED = 1006;
 
     private static final int MSG_THREAD_SET_INTENT = 2000;
-
-    public static final boolean MEDIA_CODEC_GO_JNI = true;
 
     public static boolean PLAYER_ACTIVITY_IS_LIVE = false;
 
@@ -428,7 +427,7 @@ public class PlayerActivity extends AppCompatActivity {
                 }
                 if (!mWindow1IsPlaying) {
                     mWindow1IsPlaying = true;
-                    if (MEDIA_CODEC_GO_JNI) {
+                    if (DECODER_MEDIA_CODEC_GO_JNI) {
                         addView(MSG_UI_ADD_VIEW, 1);
                     } else {
                         if (prepare1()) {
@@ -450,7 +449,7 @@ public class PlayerActivity extends AppCompatActivity {
                 }
                 if (!mWindow2IsPlaying) {
                     mWindow2IsPlaying = true;
-                    if (MEDIA_CODEC_GO_JNI) {
+                    if (DECODER_MEDIA_CODEC_GO_JNI) {
                         addView(MSG_UI_ADD_VIEW, 2);
                     } else {
                         if (prepare2()) {
@@ -1377,7 +1376,7 @@ public class PlayerActivity extends AppCompatActivity {
 
         switch (which_client) {
             case 1: {
-                if (MEDIA_CODEC_GO_JNI) {
+                if (DECODER_MEDIA_CODEC_GO_JNI) {
                     JniObject jniObject = JniObject.obtain();
                     jniObject.valueInt = which_client;
                     jniObject.valueObject = mSurfaceView1.getHolder().getSurface();
@@ -1426,7 +1425,7 @@ public class PlayerActivity extends AppCompatActivity {
                 break;
             }
             case 2: {
-                if (MEDIA_CODEC_GO_JNI) {
+                if (DECODER_MEDIA_CODEC_GO_JNI) {
                     JniObject jniObject = JniObject.obtain();
                     jniObject.valueInt = which_client;
                     jniObject.valueObject = mSurfaceView2.getHolder().getSurface();

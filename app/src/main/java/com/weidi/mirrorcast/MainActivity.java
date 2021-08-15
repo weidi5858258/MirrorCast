@@ -67,8 +67,8 @@ import static com.weidi.mirrorcast.Constants.START_MAINACTIVITY;
 import static com.weidi.mirrorcast.Constants.START_RECORD_SCREEN;
 import static com.weidi.mirrorcast.Constants.STOP_RECORD_SCREEN;
 import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_get_server_port;
+import static com.weidi.mirrorcast.MyJni.DECODER_MEDIA_CODEC_GO_JNI;
 import static com.weidi.mirrorcast.PlayerActivity.MAXIMUM_NUMBER;
-import static com.weidi.mirrorcast.PlayerActivity.MEDIA_CODEC_GO_JNI;
 import static com.weidi.mirrorcast.PlayerActivity.PLAYER_ACTIVITY_IS_LIVE;
 
 public class MainActivity extends BaseActivity {
@@ -844,7 +844,7 @@ public class MainActivity extends BaseActivity {
                     jniObject.valueInt = whatIsDevice;
                     jniObject.valueLong = MAXIMUM_NUMBER;
                     jniObject.valueString = "127.0.0.1";
-                    jniObject.valueBoolean = MEDIA_CODEC_GO_JNI;
+                    jniObject.valueBoolean = DECODER_MEDIA_CODEC_GO_JNI;
                     MyJni.getDefault().onTransact(MyJni.DO_SOMETHING_CODE_Server_set_ip, jniObject);
                     jniObject = null;
                     startService(mMediaServerIntent);

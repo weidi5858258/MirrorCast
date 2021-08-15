@@ -54,6 +54,7 @@ extern int SERVER_PROT;
 extern int what_is_device;
 extern int MAXIMUM_NUMBER;
 extern bool MEDIA_CODEC_GO_JNI;
+extern bool isRecording;
 
 /***
  called at the library loaded.
@@ -194,6 +195,36 @@ char *findDecoderCodecName(int code, int which_client, const char *data, ssize_t
     }
 
     return tmpStr;
+}
+
+void createPortraitVirtualDisplay() {
+    JNIEnv *jniEnv;
+    bool isAttached = getEnv(&jniEnv);
+    jniEnv->CallVoidMethod(myJniJavaObject, jni2JavaMethodID,
+                           DO_SOMETHING_CODE_find_createPortraitVirtualDisplay, nullptr);
+    if (isAttached) {
+        gJavaVm->DetachCurrentThread();
+    }
+}
+
+void createLandscapeVirtualDisplay() {
+    JNIEnv *jniEnv;
+    bool isAttached = getEnv(&jniEnv);
+    jniEnv->CallVoidMethod(myJniJavaObject, jni2JavaMethodID,
+                           DO_SOMETHING_CODE_find_createLandscapeVirtualDisplay, nullptr);
+    if (isAttached) {
+        gJavaVm->DetachCurrentThread();
+    }
+}
+
+void sendDataError() {
+    JNIEnv *jniEnv;
+    bool isAttached = getEnv(&jniEnv);
+    jniEnv->CallVoidMethod(myJniJavaObject, jni2JavaMethodID,
+                           DO_SOMETHING_CODE_find_encoder_send_data_error, nullptr);
+    if (isAttached) {
+        gJavaVm->DetachCurrentThread();
+    }
 }
 
 void closeJni() {
@@ -450,6 +481,92 @@ Java_com_weidi_mirrorcast_MyJni_onTransact(JNIEnv *env, jobject thiz,
             jobject surfaceObject = env->GetObjectField(jniObject, valueObject_jfieldID);
             setSurface(which_client, env, surfaceObject);
             env->DeleteLocalRef(surfaceObject);
+            return env->NewStringUTF(ret);
+        }
+        case DO_SOMETHING_CODE_start_record_screen_prepare: {
+            jobject intArrayObject = env->GetObjectField(jniObject, valueIntArray_jfieldID);
+            jobject stringArrayObject = env->GetObjectField(jniObject, valueStringArray_jfieldID);
+            if (intArrayObject != nullptr && stringArrayObject != nullptr) {
+                // int[]
+                jint *intArray = reinterpret_cast<jint *>(
+                        env->GetIntArrayElements(static_cast<jintArray>(intArrayObject), nullptr));
+                int info_length = intArray[0];
+                int orientation = intArray[1];
+                int width = intArray[2];
+                int height = intArray[3];
+                int port = intArray[4];
+                // String[]
+                jobjectArray stringArray = reinterpret_cast<jobjectArray>(stringArrayObject);
+                jstring info_ = static_cast<jstring>(env->GetObjectArrayElement(stringArray, 0));
+                jstring mime_ = static_cast<jstring>(env->GetObjectArrayElement(stringArray, 1));
+                jstring codec_name_ =
+                        static_cast<jstring>(env->GetObjectArrayElement(stringArray, 2));
+                jstring ip_ = static_cast<jstring>(env->GetObjectArrayElement(stringArray, 3));
+                const char *info = env->GetStringUTFChars(info_, 0);
+                const char *mime = env->GetStringUTFChars(mime_, 0);
+                const char *codec_name = env->GetStringUTFChars(codec_name_, 0);
+                const char *ip = env->GetStringUTFChars(ip_, 0);
+
+                set_client_info(info, info_length);
+                SERVER_PROT = port;
+                setIP(ip);
+                // 下面的按顺序调用
+                createEncoderMediaFormat(mime, orientation, width, height);
+                createEncoderMediaCodec(codec_name);
+                createEncoderSurface();
+                ANativeWindow *surface1_ = getSurface(1);
+                ANativeWindow *surface2_ = getSurface(2);
+                startEncoderMediaCodec();
+
+                env->ReleaseStringUTFChars(info_, info);
+                env->ReleaseStringUTFChars(mime_, mime);
+                env->ReleaseStringUTFChars(codec_name_, codec_name);
+                env->ReleaseStringUTFChars(ip_, ip);
+                env->DeleteLocalRef(intArrayObject);
+                env->DeleteLocalRef(stringArrayObject);
+
+                if (client_connect()) {
+                    // 设置Surface
+                    jobject surface1 = ANativeWindow_toSurface(env, surface1_);
+                    jobject surface2 = ANativeWindow_toSurface(env, surface2_);
+                    jclass elementClass = env->FindClass("java/lang/Object");
+                    jobjectArray objectArray = env->NewObjectArray(2, elementClass, nullptr);
+                    env->SetObjectArrayElement(objectArray, 0, surface1);
+                    env->SetObjectArrayElement(objectArray, 1, surface2);
+                    env->SetObjectField(jniObject, valueObjectArray_jfieldID, objectArray);
+                    // objectArray不确定要不要被释放
+                    env->DeleteLocalRef(elementClass);
+                    elementClass = nullptr;
+                    return env->NewStringUTF("true");
+                }
+            }
+            return env->NewStringUTF("false");
+        }
+        case DO_SOMETHING_CODE_start_record_screen: {
+            startRecordScreen();
+            return env->NewStringUTF(ret);
+        }
+        case DO_SOMETHING_CODE_is_recording: {
+            if (isRecording) {
+                return env->NewStringUTF("true");
+            }
+            return env->NewStringUTF("false");
+        }
+        case DO_SOMETHING_CODE_stop_record_screen: {
+            client_disconnect();
+            stopRecordScreen(false);
+            return env->NewStringUTF(ret);
+        }
+        case DO_SOMETHING_CODE_fromPortraitToLandscape: {
+            fromPortraitToLandscape();
+            return env->NewStringUTF(ret);
+        }
+        case DO_SOMETHING_CODE_fromLandscapeToPortrait: {
+            fromLandscapeToPortrait();
+            return env->NewStringUTF(ret);
+        }
+        case DO_SOMETHING_CODE_release_sps_pps: {
+            stopRecordScreen(true);
             return env->NewStringUTF(ret);
         }
 

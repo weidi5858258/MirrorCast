@@ -123,7 +123,7 @@ void setIP(const char *ip) {
     LOGI("setIP() SERVER_PROT: %d\n", SERVER_PROT);
 }
 
-int uint8tToInt(uint8_t *src) {
+static int uint8tToInt(uint8_t *src) {
     int value;
     value = (int) ((src[0] & 0xFF)
                    | ((src[1] & 0xFF) << 8)
@@ -497,7 +497,6 @@ void *receive_data(void *arg) {
                                 char *name = findDecoderCodecName(
                                         DO_SOMETHING_CODE_find_decoder_codec_name,
                                         which_client, p, length);
-                                LOGI("receive_data()              name: %s\n", name);
                                 if (which_client == 1) {
                                     mimeLength1 = length;
                                     codecNameLength1 = strlen(name);

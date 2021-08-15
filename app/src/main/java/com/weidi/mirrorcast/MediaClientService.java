@@ -47,6 +47,16 @@ import static com.weidi.mirrorcast.Constants.SET_IP_AND_PORT;
 import static com.weidi.mirrorcast.Constants.SET_MEDIAPROJECTION;
 import static com.weidi.mirrorcast.Constants.START_RECORD_SCREEN;
 import static com.weidi.mirrorcast.Constants.STOP_RECORD_SCREEN;
+import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_find_createLandscapeVirtualDisplay;
+import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_find_createPortraitVirtualDisplay;
+import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_find_encoder_send_data_error;
+import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_fromLandscapeToPortrait;
+import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_fromPortraitToLandscape;
+import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_is_recording;
+import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_release_sps_pps;
+import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_start_record_screen;
+import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_stop_record_screen;
+import static com.weidi.mirrorcast.MyJni.ENCODER_MEDIA_CODEC_GO_JNI;
 
 public class MediaClientService extends Service {
 
@@ -169,6 +179,10 @@ public class MediaClientService extends Service {
         if (mHandlerThread != null) {
             mHandlerThread.quitSafely();
         }
+        if (ENCODER_MEDIA_CODEC_GO_JNI) {
+            // notify to jni for free sps_pps
+            mMyJni.onTransact(DO_SOMETHING_CODE_release_sps_pps, null);
+        }
         EventBusUtils.unregister(this);
     }
 
@@ -250,6 +264,13 @@ public class MediaClientService extends Service {
                 break;
             }
             case IS_RECORDING: {
+                if (ENCODER_MEDIA_CODEC_GO_JNI) {
+                    String str = mMyJni.onTransact(DO_SOMETHING_CODE_is_recording, null);
+                    if (TextUtils.isEmpty(str)) {
+                        return false;
+                    }
+                    return Boolean.parseBoolean(str);
+                }
                 return mIsRecording;
             }
             case SET_IP_AND_PORT: {
@@ -285,6 +306,25 @@ public class MediaClientService extends Service {
                 }
                 break;
             }
+            case DO_SOMETHING_CODE_find_createPortraitVirtualDisplay: {
+                if (mActivity != null) {
+                    mActivity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+                }
+                createPortraitVirtualDisplay();
+                break;
+            }
+            case DO_SOMETHING_CODE_find_createLandscapeVirtualDisplay: {
+                if (mActivity != null) {
+                    mActivity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+                }
+                createLandscapeVirtualDisplay();
+                break;
+            }
+            case DO_SOMETHING_CODE_find_encoder_send_data_error: {
+                releaseAll();
+                EventBusUtils.post(MainActivity.class, MAINACTIVITY_ON_RESUME, null);
+                break;
+            }
             default:
                 break;
         }
@@ -312,6 +352,10 @@ public class MediaClientService extends Service {
 
         switch (msg.what) {
             case START_RECORD_SCREEN: {
+                if (ENCODER_MEDIA_CODEC_GO_JNI) {
+                    startRecordScreenForJni();
+                    return;
+                }
                 if ((whatIsDevice != Configuration.UI_MODE_TYPE_TELEVISION)
                         ? prepare()
                         : prepareForTV()) {
@@ -322,6 +366,10 @@ public class MediaClientService extends Service {
                 break;
             }
             case STOP_RECORD_SCREEN: {
+                if (ENCODER_MEDIA_CODEC_GO_JNI) {
+                    stopRecordScreenForJni();
+                    return;
+                }
                 stopRecordScreen();
                 break;
             }
@@ -712,6 +760,125 @@ public class MediaClientService extends Service {
 
         Log.i(TAG, "prepareForTV() end");
         return true;
+    }
+
+    private synchronized boolean startRecordScreenForJni() {
+        if (mActivity == null) {
+            Log.e(TAG, "startRecordScreenForJni() return for activity is null");
+            return false;
+        }
+        if (mMediaProjection == null) {
+            Log.e(TAG, "startRecordScreenForJni() return for mMediaProjection is null");
+            return false;
+        }
+
+        Log.i(TAG, "startRecordScreenForJni() start");
+
+        if (TextUtils.isEmpty(mVideoEncoderCodecName)) {
+            mVideoEncoderCodecName = findEncoderCodecName(MediaFormat.MIMETYPE_VIDEO_AVC);
+            mVideoMime = MediaFormat.MIMETYPE_VIDEO_AVC;
+        }
+        if (TextUtils.isEmpty(mVideoEncoderCodecName)) {
+            mVideoEncoderCodecName = findEncoderCodecName(MediaFormat.MIMETYPE_VIDEO_HEVC);
+            mVideoMime = MediaFormat.MIMETYPE_VIDEO_HEVC;
+        }
+        if (TextUtils.isEmpty(mVideoEncoderCodecName)) {
+            Log.e(TAG, "startRecordScreenForJni() mVideoEncoderCodecName is null");
+            releaseAll();
+            return false;
+        }
+        Log.i(TAG, "startRecordScreenForJni() mVideoEncoderCodecName: " + mVideoEncoderCodecName);
+
+        mPreOrientation = mCurOrientation = getResources().getConfiguration().orientation;
+        mDisplayMetrics = new DisplayMetrics();
+        mWindowManager.getDefaultDisplay().getRealMetrics(mDisplayMetrics);
+
+        int width = 0;
+        int height = 0;
+        int tempOrientation = mCurOrientation;
+        if (tempOrientation == Configuration.ORIENTATION_PORTRAIT) {
+            mScreenWidthPortrait = mDisplayMetrics.widthPixels;
+            mScreenHeightPortrait = mDisplayMetrics.heightPixels;
+            mScreenWidthLandscape = mScreenHeightPortrait;
+            mScreenHeightLandscape = mScreenWidthPortrait;
+            width = mScreenWidthPortrait;
+            height = mScreenHeightPortrait;
+        } else if (tempOrientation == Configuration.ORIENTATION_LANDSCAPE) {
+            mScreenWidthLandscape = mDisplayMetrics.widthPixels;
+            mScreenHeightLandscape = mDisplayMetrics.heightPixels;
+            mScreenWidthPortrait = mScreenHeightLandscape;
+            mScreenHeightPortrait = mScreenWidthLandscape;
+            width = mScreenWidthLandscape;
+            height = mScreenHeightLandscape;
+        }
+
+        String deviceName = Settings.Global.getString(
+                getContentResolver(), Settings.Global.DEVICE_NAME);
+        if (TextUtils.isEmpty(deviceName)) {
+            deviceName = "MirrorCast";
+        }
+        // 先向服务端发送配置信息,服务端拿到这些信息可以先初始化一些东西
+        StringBuilder sb = new StringBuilder();
+        sb.append(deviceName);// 设备名称
+        sb.append(FLAG);
+        sb.append(mVideoMime);// mime
+        sb.append(FLAG);
+        if (tempOrientation == Configuration.ORIENTATION_PORTRAIT) {
+            sb.append(mScreenWidthPortrait);
+            sb.append(FLAG);
+            sb.append(mScreenHeightPortrait);
+        } else if (tempOrientation == Configuration.ORIENTATION_LANDSCAPE) {
+            sb.append(mScreenWidthLandscape);
+            sb.append(FLAG);
+            sb.append(mScreenHeightLandscape);
+        }
+        sb.append(FLAG);
+        sb.append(tempOrientation);// 横屏还是竖屏
+
+        // Test
+        /*IP = "192.168.1.102";
+        PORT = 5858;*/
+
+        Log.i(TAG, "startRecordScreenForJni() IP: " + IP + " PORT: " + PORT);
+        JniObject jniObject = JniObject.obtain();
+        jniObject.valueIntArray = new int[]{
+                sb.length(), tempOrientation, width, height, PORT};
+        jniObject.valueStringArray = new String[]{
+                sb.toString(), mVideoMime, mVideoEncoderCodecName, IP};
+        String str = mMyJni.onTransact(MyJni.DO_SOMETHING_CODE_start_record_screen_prepare, jniObject);
+        if (TextUtils.isEmpty(str)) {
+            return false;
+        }
+        boolean ret = Boolean.parseBoolean(str);
+        if (!ret) {
+            mUiHandler.post(new Runnable() {
+                @Override
+                public void run() {
+                    Toast.makeText(
+                            mContext, "没有连接上服务端", Toast.LENGTH_SHORT).show();
+                }
+            });
+            mActivity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR);
+            mActivity = null;
+            releaseAll();
+            return false;
+        }
+
+        mSurfacePortrait = (Surface) jniObject.valueObjectArray[0];
+        mSurfaceLandscape = (Surface) jniObject.valueObjectArray[1];
+
+        mMediaProjection.registerCallback(mMediaProjectionCallback, mThreadHandler);
+
+        allowSendOrientation = false;
+        mMyJni.onTransact(DO_SOMETHING_CODE_start_record_screen, null);
+        allowSendOrientation = true;
+        Log.i(TAG, "startRecordScreenForJni() end");
+        return true;
+    }
+
+    private synchronized void stopRecordScreenForJni() {
+        mMyJni.onTransact(DO_SOMETHING_CODE_stop_record_screen, null);
+        releaseAll();
     }
 
     private synchronized void startRecordScreen() {
@@ -1346,10 +1513,18 @@ public class MediaClientService extends Service {
             if (mPreOrientation != mCurOrientation) {
                 if (mPreOrientation == Configuration.ORIENTATION_PORTRAIT) {
                     // 竖屏 ---> 横屏
-                    fromPortraitToLandscape();
+                    if (ENCODER_MEDIA_CODEC_GO_JNI) {
+                        mMyJni.onTransact(DO_SOMETHING_CODE_fromPortraitToLandscape, null);
+                    } else {
+                        fromPortraitToLandscape();
+                    }
                 } else {
                     // 横屏 ---> 竖屏
-                    fromLandscapeToPortrait();
+                    if (ENCODER_MEDIA_CODEC_GO_JNI) {
+                        mMyJni.onTransact(DO_SOMETHING_CODE_fromLandscapeToPortrait, null);
+                    } else {
+                        fromLandscapeToPortrait();
+                    }
                 }
                 mPreOrientation = mCurOrientation;
             }

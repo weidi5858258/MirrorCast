@@ -385,7 +385,7 @@ void *startDecoder(void *arg) {
 
 void free1() {
     LOGI("free1() start\n");
-    release1();
+    release1(true);
     int size = list1.size();
     if (size != 0) {
         LOGI("free1() list1 is not empty, %d\n", size);
@@ -412,7 +412,7 @@ void free1() {
 
 void free2() {
     LOGI("free2() start\n");
-    release2();
+    release2(true);
     int size = list2.size();
     if (size != 0) {
         LOGI("free2() list2 is not empty, %d\n", size);
