@@ -4,6 +4,7 @@
 
 #include <jni.h>
 #include <string>
+#include <sys/system_properties.h>
 #include "include/Log.h"
 #include "MyJni.h"
 #include "MediaServer.h"
@@ -14,7 +15,11 @@
 #define LOG "player_alexander"
 
 /***
- 
+ https://www.jianshu.com/p/259a31f628a4
+ Android Studio+LLDB调试内核Binder
+
+ https://www.jb51.net/article/183149.htm
+ 创建Android守护进程实例(底层服务)
  */
 
 // 这个值在任何情况下都不要置为"NULL"
@@ -228,6 +233,19 @@ void sendDataError() {
     }
 }
 
+int getSdkVersion() {
+    char sdk[128] = "0";
+
+    // 获取版本号方法
+    __system_property_get("ro.build.version.sdk", sdk);
+    //__system_property_read_callback();
+
+    //将版本号转为 int 值
+    int sdk_verison = atoi(sdk);
+
+    return sdk_verison;
+}
+
 void closeJni() {
     JNIEnv *env;
     bool isAttached = getEnv(&env);
@@ -402,9 +420,13 @@ Java_com_weidi_mirrorcast_MyJni_onTransact(JNIEnv *env, jobject thiz,
             const char *ip = env->GetStringUTFChars(ipStr, 0);
             setIP(ip);
             env->ReleaseStringUTFChars(ipStr, ip);
+            // 判断是手机还是电视机
             what_is_device = env->GetIntField(jniObject, valueInt_jfieldID);
+            // 如果是电视机,最多投射的个数
             MAXIMUM_NUMBER = env->GetLongField(jniObject, valueLong_jfieldID);
+            // 解码器是否走native路线
             MEDIA_CODEC_GO_JNI = env->GetBooleanField(jniObject, valueBoolean_jfieldID);
+
             return env->NewStringUTF(ret);
         }
         case DO_SOMETHING_CODE_Server_accept: {

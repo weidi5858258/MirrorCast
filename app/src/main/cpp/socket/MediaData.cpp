@@ -44,6 +44,8 @@ extern ssize_t sps_pps_size_landscape2;
 
 static void drainFrame(std::list<Data *> *list) {
     size_t size1 = list->size();
+    /*if (size1 >= 5) {
+    }*/
     bool firstKeyFrame = false;
     int count = 0;
     for (auto &data:*list) {
@@ -54,49 +56,52 @@ static void drainFrame(std::list<Data *> *list) {
         }
     }
     if (firstKeyFrame && count > 1) {
-        //LOGE("drainFrame() size 1: %d", size1);
+        LOGE("drainFrame() size 1: %d", size1);
         // 先丢一次
         for (;;) {
             Data *data = list->front();
             if ((data->data[data->size - 1] & 1) == 0) {
                 // 非关键帧
-                list->pop_front();
                 if (data->data != nullptr) {
                     free(data->data);
                     data->data = nullptr;
                 }
                 free(data);
                 data = nullptr;
+                list->pop_front();
             } else {
                 break;
             }
         }
         size_t size2 = list->size();
-        //LOGI("drainFrame() size 2: %d", size2);
+        LOGI("drainFrame() size 2: %d", size2);
         // 再丢一次
         if (/*size2 >= 5 && */size1 > size2) {
+            firstKeyFrame = false;
             bool secondKeyFrame = false;
+            count = 0;
             for (auto &data:*list) {
+                ++count;
                 firstKeyFrame = ((data->data[data->size - 1] & 1) != 0);
                 if (firstKeyFrame && secondKeyFrame) {
                     break;
-                } else if (firstKeyFrame) {
+                } else if (firstKeyFrame && !secondKeyFrame) {
                     secondKeyFrame = true;
                 }
             }
-            if (firstKeyFrame && secondKeyFrame) {
+            if (firstKeyFrame && secondKeyFrame && count > 2) {
                 secondKeyFrame = false;
                 for (;;) {
                     Data *data = list->front();
                     if ((data->data[data->size - 1] & 1) == 0) {
                         // 非关键帧
-                        list->pop_front();
                         if (data->data != nullptr) {
                             free(data->data);
                             data->data = nullptr;
                         }
                         free(data);
                         data = nullptr;
+                        list->pop_front();
                     } else {
                         if (secondKeyFrame) {
                             break;
@@ -105,7 +110,7 @@ static void drainFrame(std::list<Data *> *list) {
                     }
                 }
                 size_t size3 = list->size();
-                //LOGD("drainFrame() size 3: %d", size3);
+                LOGD("drainFrame() size 3: %d", size3);
             }
         }
     }

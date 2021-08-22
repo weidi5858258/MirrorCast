@@ -41,23 +41,64 @@ add_library(socket
 # 第三方库使用add_library(...)和set_target_properties(...)
 # Android平台上已存在的预构建的NDK库使用find_library(...)和target_link_libraries(...)
 
+# /root/mydev/tools/android_sdk/ndk-bundle-21/platforms/android-29/arch-arm64/usr/lib/
+# 下面的库是android系统提供的,可以直接使用的
 find_library(log-lib
         log)
 find_library(android-lib
         android)
-find_library(mediandk-lib
-        mediandk)
+find_library(c-lib
+        c)
+find_library(m-lib
+        m)
+find_library(z-lib
+        z)
+find_library(compiler_rt-extras-lib
+        compiler_rt-extras)
+find_library(dl-lib
+        dl)
+find_library(EGL-lib
+        EGL)
+find_library(GLESv1_CM-lib
+        GLESv1_CM)
+find_library(GLESv2-lib
+        GLESv2)
+find_library(jnigraphics-lib
+        jnigraphics)
 find_library(OpenMAXAL-lib
         OpenMAXAL)
+find_library(OpenSLES-lib
+        OpenSLES)
+find_library(stdc++-lib
+        stdc++)
 
-#[[find_library(audioclient-lib
-        audioclient)
-find_library(binder-lib
-        binder)
-find_library(cutils-lib
-        cutils)
-find_library(utils-lib
-        utils)]]
+# 下面的库是区分sdk版本的
+# android-18
+find_library(GLESv3-lib
+        GLESv3)
+# android-21
+find_library(mediandk-lib
+        mediandk)
+# android-24
+find_library(camera2ndk-lib
+        camera2ndk)
+find_library(vulkan-lib
+        vulkan)
+# android-26
+find_library(nativewindow-lib
+        nativewindow)
+find_library(sync-lib
+        sync)
+# android-27
+find_library(aaudio-lib
+        aaudio)
+find_library(neuralnetworks-lib
+        neuralnetworks)
+# android-29
+find_library(amidi-lib
+        amidi)
+find_library(binder_ndk-lib
+        binder_ndk)
 
 #################################################################
 # 关联库 # ffmpeg
@@ -69,13 +110,9 @@ target_link_libraries(
         # ${log-lib}是log库的路径
         ${log-lib}
         ${android-lib}
+        ${stdc++-lib}
         ${mediandk-lib}
         ${OpenMAXAL-lib}
-
-        #[[${audioclient-lib}
-        ${binder-lib}
-        ${cutils-lib}
-        ${utils-lib}]]
 
         # 编译当前库时需要引用的第三方库
 )
