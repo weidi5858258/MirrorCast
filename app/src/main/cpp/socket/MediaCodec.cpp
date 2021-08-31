@@ -884,13 +884,13 @@ void createEncoderMediaFormat(const char *mime,
 
     AMediaFormat_setInt32(format1, AMEDIAFORMAT_KEY_MAX_INPUT_SIZE, width * height);
     AMediaFormat_setInt32(format1, AMEDIAFORMAT_KEY_COLOR_FORMAT, 0x7F000789);// 录制屏幕专用
-    AMediaFormat_setInt32(format1, AMEDIAFORMAT_KEY_BIT_RATE, 8000000);
+    AMediaFormat_setInt32(format1, AMEDIAFORMAT_KEY_BIT_RATE, 10000000);
     AMediaFormat_setInt32(format1, AMEDIAFORMAT_KEY_FRAME_RATE, 25);
     AMediaFormat_setInt32(format1, AMEDIAFORMAT_KEY_I_FRAME_INTERVAL, 1);
 
     AMediaFormat_setInt32(format2, AMEDIAFORMAT_KEY_MAX_INPUT_SIZE, width * height);
     AMediaFormat_setInt32(format2, AMEDIAFORMAT_KEY_COLOR_FORMAT, 0x7F000789);
-    AMediaFormat_setInt32(format2, AMEDIAFORMAT_KEY_BIT_RATE, 8000000);
+    AMediaFormat_setInt32(format2, AMEDIAFORMAT_KEY_BIT_RATE, 10000000);
     AMediaFormat_setInt32(format2, AMEDIAFORMAT_KEY_FRAME_RATE, 25);
     AMediaFormat_setInt32(format2, AMEDIAFORMAT_KEY_I_FRAME_INTERVAL, 1);
 }

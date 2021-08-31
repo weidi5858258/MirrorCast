@@ -565,7 +565,7 @@ public class MediaClientService extends Service {
         }
 
         format1.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, width * height);
-        format1.setInteger(MediaFormat.KEY_BIT_RATE, 8000000);// maxBps * 1024
+        format1.setInteger(MediaFormat.KEY_BIT_RATE, 10000000);// maxBps * 1024 8000000
         format1.setInteger(MediaFormat.KEY_FRAME_RATE, 25);// fps
         format1.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);// ifi
         format1.setInteger(MediaFormat.KEY_COLOR_FORMAT,
@@ -582,7 +582,7 @@ public class MediaClientService extends Service {
                 MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR);
 
         format2.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, width * height);
-        format2.setInteger(MediaFormat.KEY_BIT_RATE, 8000000);
+        format2.setInteger(MediaFormat.KEY_BIT_RATE, 10000000);
         format2.setInteger(MediaFormat.KEY_FRAME_RATE, 25);
         format2.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);
         format2.setInteger(MediaFormat.KEY_COLOR_FORMAT,
