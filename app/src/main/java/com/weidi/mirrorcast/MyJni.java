@@ -250,7 +250,12 @@ public class MyJni {
                 String widthStr = infos[2];
                 String heightStr = infos[3];
                 String orientationStr = infos[4];
-                int orientation = Integer.parseInt(orientationStr);
+                int orientation = 1;
+                try {
+                    orientation = Integer.parseInt(orientationStr);
+                } catch (Exception e) {
+                    e.printStackTrace();
+                }
                 initQueue(which_client);
                 switch (which_client) {
                     case 1: {

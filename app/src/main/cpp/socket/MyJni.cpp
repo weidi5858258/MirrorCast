@@ -431,6 +431,7 @@ Java_com_weidi_mirrorcast_MyJni_onTransact(JNIEnv *env, jobject thiz,
         }
         case DO_SOMETHING_CODE_Server_accept: {
             server_accept();
+            // server_accept_udp();
             return env->NewStringUTF(ret);
         }
         case DO_SOMETHING_CODE_Server_close: {

@@ -16,3 +16,5 @@ void server_close();
 void close_all_clients();
 
 void close_client(int which_client);
+
+void server_accept_udp();

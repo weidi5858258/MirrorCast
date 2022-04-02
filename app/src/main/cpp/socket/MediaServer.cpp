@@ -699,3 +699,538 @@ void close_client(int which_client) {
             break;
     }
 }
+
+///////////////////////////////////UDP///////////////////////////////////
+
+void *receive_data_udp(void *arg);
+
+int read_data_udp(int client_sock_fd, ssize_t want_to_read_length,
+                  char *read_buffer, char *data_buffer) {
+    ssize_t read_length = 0;
+    ssize_t total_read_length = 0;
+    while (total_read_length < want_to_read_length) {
+        /*read_length = read(
+                client_sock_fd, read_buffer, want_to_read_length - total_read_length);*/
+        read_length = recvfrom(client_sock_fd, read_buffer, want_to_read_length - total_read_length,
+                               0, NULL, NULL);
+        if (read_length > 0) {
+            memcpy(data_buffer + total_read_length, read_buffer, read_length);
+            total_read_length += read_length;
+        } else {
+            return EXIT_FAILURE;
+        }
+    }
+    return EXIT_SUCCESS;
+}
+
+int read_data_udp(int client_sock_fd, ssize_t want_to_read_length,
+                  uint8_t *read_buffer, uint8_t *data_buffer) {
+    ssize_t read_length = 0;
+    ssize_t total_read_length = 0;
+    while (total_read_length < want_to_read_length) {
+        /*read_length = read(
+                client_sock_fd, read_buffer, want_to_read_length - total_read_length);*/
+        read_length = recvfrom(client_sock_fd, read_buffer, want_to_read_length - total_read_length,
+                               0, NULL, NULL);
+        if (read_length > 0) {
+            memcpy(data_buffer + total_read_length, read_buffer, read_length);
+            total_read_length += read_length;
+        } else {
+            return EXIT_FAILURE;
+        }
+    }
+    return EXIT_SUCCESS;
+}
+
+bool server_bind_udp() {
+    LOGI("MediaServer server_bind() start\n");
+    LOGI("MediaServer accept() IP: %s\n", IP);
+    int err = -1;
+    while (1) {
+        /////////////////////////////socket创建过程/////////////////////////////
+
+        ++SERVER_PROT;
+
+        // 建立一个流式套接字
+        LOGI("MediaServer socket(...) start\n");
+        // tcp: SOCK_STREAM
+        // udp: SOCK_DGRAM
+        server_sock_fd = socket(AF_INET, SOCK_DGRAM, 0);
+        LOGI("MediaServer socket(...) end\n");
+        if (server_sock_fd == -1) {
+            fprintf(stderr, "socket error: %s\n", strerror(errno));
+            LOGE("socket error: %s\n", strerror(errno));
+            return false;
+        }
+
+        // 解决在close之后会有一个WAIT_TIME,导致bind失败的问题
+        int val = 1;// -1
+        LOGI("MediaServer setsockopt(...) start\n");
+        err = setsockopt(server_sock_fd,
+                         SOL_SOCKET,
+                         SO_REUSEADDR,
+                         (void *) &val,
+                         sizeof(int));
+        LOGI("MediaServer setsockopt(...) end\n");
+        if (err == -1) {
+            fprintf(stderr, "setsockopt error: %s\n", strerror(errno));
+            LOGE("setsockopt error: %s\n", strerror(errno));
+            close_server_sock(&server_sock_fd);
+            return false;
+        }
+
+        /////////////////////////////bind绑定过程/////////////////////////////
+
+        memset(&server_addr, 0, sizeof(struct sockaddr_in));
+        memset(&client_addr1, 0, sizeof(struct sockaddr_in));
+        memset(&client_addr2, 0, sizeof(struct sockaddr_in));
+        // 设置服务端地址
+        // 清零
+        // memset(&server_addr, 0, sizeof(server_addr));
+        bzero(&server_addr, sizeof(server_addr));
+        // 将server_addr.sin_zero保留字段置为0
+        bzero(&(server_addr.sin_zero), 8);
+        // 使用IPV4地址
+        // 设置协议族,意思就是打算采用什么协议族.跟socket()函数中的__domain参数要一致
+        server_addr.sin_family = AF_INET;
+        // 服务器端口(65535).地址结构的端口地址,网络字节序(PORT为主机字节序,需要转化为网络字节序)
+        // 我想使用这个端口之前,应不应该判断一下这个端口可不可以使用,有没有被其他进程占用
+        server_addr.sin_port = htons(SERVER_PROT);
+        /* INADDR_ANY表示不管是哪个网卡接收到数据，只要目的端口是SERVER_PROT，就会被该应用程序接收到 */
+        server_addr.sin_addr.s_addr = htonl(INADDR_ANY);
+        // 将字符串的IP地址转化为网络字节序
+        // server_addr.sin_addr.s_addr = inet_addr(IP);
+
+        // 绑定地址结构到套接字描述符
+        LOGI("MediaServer bind(...) start\n");
+        err = bind(server_sock_fd, (struct sockaddr *) &server_addr, sizeof(struct sockaddr));
+        LOGI("MediaServer bind(...) end\n");
+        if (err == -1) {
+            fprintf(stderr, "bind error: %s\n", strerror(errno));
+            LOGE("bind error: %s\n", strerror(errno));
+            close_server_sock(&server_sock_fd);
+            continue;
+        }
+
+        break;
+    }
+    LOGD("MediaServer server_bind() SERVER_PROT: %d\n", SERVER_PROT);
+    LOGI("MediaServer server_bind() end\n");
+    return true;
+}
+
+void server_accept_udp() {
+    LOGI("MediaServer accept() start\n");
+    LOGI("MediaServer accept() IP: %s\n", IP);
+
+    if (!server_bind_udp()) {
+        LOGE("MediaServer server_bind() failed\n");
+        return;
+    }
+
+    struct sockaddr_in client_addr;
+    socklen_t addrlen = sizeof(struct sockaddr);
+    memset(&client_addr, 0, sizeof(struct sockaddr_in));
+
+    int which_client = 0;
+    bool onlyOne = true;
+    if (what_is_device != 4) {
+        // not TV
+
+    } else {
+        // TV
+        if (MAXIMUM_NUMBER == 1) {
+
+        } else {
+            onlyOne = false;
+        }
+    }
+
+    if (onlyOne) {
+        LOGI("MediaServer accept() one device\n");
+        if (client_sock_fd1 == -1) {
+            which_client = 1;
+            client_addr1 = client_addr;
+            client_sock_fd1 = server_sock_fd;
+            LOGI("MediaServer accept() 1\n");
+        } else {
+            // 替换过程
+            close_client_sock(&client_sock_fd1);
+            sleep(3);
+            which_client = 1;
+            client_addr1 = client_addr;
+            client_sock_fd1 = server_sock_fd;
+            LOGI("MediaServer accept() 1 replace\n");
+        }
+    } else {
+        LOGI("MediaServer accept() two devices\n");
+        if (client_sock_fd1 == -1) {
+            which_client = 1;
+            client_addr1 = client_addr;
+            client_sock_fd1 = server_sock_fd;
+            LOGI("MediaServer accept() 1\n");
+        } else if (client_sock_fd2 == -1) {
+            which_client = 2;
+            client_addr2 = client_addr;
+            client_sock_fd2 = server_sock_fd;
+            LOGI("MediaServer accept() 2\n");
+        } else {
+            // 替换过程(替换哪一个)
+            switch (which_replace) {
+                case 1: {
+                    close_client_sock(&client_sock_fd1);
+                    sleep(3);
+                    which_client = 1;
+                    client_addr1 = client_addr;
+                    client_sock_fd1 = server_sock_fd;
+                    LOGI("MediaServer accept() 1 replace\n");
+                    break;
+                }
+                case 2: {
+                    close_client_sock(&client_sock_fd2);
+                    sleep(3);
+                    which_client = 2;
+                    client_addr2 = client_addr;
+                    client_sock_fd2 = server_sock_fd;
+                    LOGI("MediaServer accept() 2 replace\n");
+                    break;
+                }
+                default:
+                    break;
+            }
+        }
+    }
+    LOGI("MediaServer accept() client_sock_fd1: %d\n", client_sock_fd1);
+    LOGI("MediaServer accept() client_sock_fd2: %d\n", client_sock_fd2);
+
+    /*// 开启线程不断地读取数据
+    pthread_t p_tids_receive_data;
+    // 定义一个属性
+    pthread_attr_t attr;
+    sched_param param;
+    // 初始化属性值,均设为默认值
+    pthread_attr_init(&attr);
+    pthread_attr_getschedparam(&attr, &param);
+    pthread_attr_setschedparam(&attr, &param);
+    pthread_attr_setscope(&attr, PTHREAD_SCOPE_SYSTEM);
+    LOGI("MediaServer pthread_create() 1\n");
+    pthread_create(&p_tids_receive_data, &attr, receive_data_udp, &which_client);
+    LOGI("MediaServer pthread_create() 2\n");
+    pthread_join(p_tids_receive_data, NULL);*/
+
+    receive_data_udp(&which_client);
+
+    /*while (server_is_live) {
+    }
+
+    sleep(3);
+
+    server_close_all();*/
+    LOGI("MediaServer accept() end\n");
+}
+
+uint8_t data_buffer_temp[DATA_BUFFER];
+
+void *receive_data_udp(void *arg) {
+    LOGI("MediaServer receive_data_udp()\n");
+    int *argc = static_cast<int *>(arg);
+
+    // region 分配变量
+    int which_client = 0;
+    int client_sock_fd = 0;
+    ssize_t want_to_read_length = 0;
+    uint8_t *read_buffer = NULL;
+    uint8_t *data_buffer = NULL;
+    switch (*argc) {
+        case 1: {
+            which_client = 1;
+            client_sock_fd = client_sock_fd1;
+            read_buffer = read_buffer1;
+            data_buffer = data_buffer1;
+            client_info_length1 = 0;
+            memset(client_info1, 0, sizeof(client_info1));
+            break;
+        }
+        case 2: {
+            which_client = 2;
+            client_sock_fd = client_sock_fd2;
+            read_buffer = read_buffer2;
+            data_buffer = data_buffer2;
+            client_info_length2 = 0;
+            memset(client_info2, 0, sizeof(client_info2));
+            break;
+        }
+        default:
+            return nullptr;
+    }
+    // endregion
+
+    LOGI("MediaServer receive_data() connect which_client: %d\n", which_client);
+    LOGI("MediaServer receive_data() client_sock_fd1: %d\n", client_sock_fd1);
+    LOGI("MediaServer receive_data() client_sock_fd2: %d\n", client_sock_fd2);
+
+    // region 读取客户端的"设备名称"
+    int width = 0;
+    int height = 0;
+    int orientation = 1; // 初始化时投屏端设备的方向(1为竖屏,2为横屏)
+    char client_info[1024];
+    char temp_client_info[1024];
+    memset(client_info, 0, sizeof(client_info));
+    memset(temp_client_info, 0, sizeof(temp_client_info));
+    int ret = read_data_udp(client_sock_fd, 4, read_buffer, data_buffer);
+    LOGI("receive_data() ret: %d\n", ret);
+
+    // 通知Java有设备连接上了
+    connect(which_client);
+
+    if (ret == EXIT_SUCCESS) {
+        want_to_read_length = uint8tToInt(data_buffer);
+        LOGI("receive_data() want_to_read_length: %d\n", want_to_read_length);
+        if (want_to_read_length > 0) {
+            ret = read_data_udp(client_sock_fd, want_to_read_length, temp_client_info, client_info);
+            LOGI("receive_data() ret: %d\n", ret);
+            if (ret == EXIT_SUCCESS) {
+                switch (which_client) {
+                    case 1: {
+                        client_info_length1 = want_to_read_length;
+                        memcpy(client_info1, client_info, want_to_read_length);
+                        break;
+                    }
+                    case 2: {
+                        client_info_length2 = want_to_read_length;
+                        memcpy(client_info2, client_info, want_to_read_length);
+                        break;
+                    }
+                    default:
+                        break;
+                }
+                // device_name: ARS-AL00   device_name_length: 8
+                // device_name: OnePlus 5T device_name_length: 10
+                LOGI("receive_data() which_client: %d client_info: %s client_info_length: %d\n",
+                     which_client, client_info, want_to_read_length);
+                setData(DO_SOMETHING_CODE_Client_set_info,
+                        which_client, client_info, want_to_read_length);
+                if (MEDIA_CODEC_GO_JNI) {
+                    // ARS-AL00@@@@@video/hevc@@@@@1080@@@@@2244@@@@@1
+                    // 需要知道开始投屏时的方向
+                    int count = 0;
+                    char *p = nullptr;
+                    char *buff = nullptr;
+                    buff = client_info;
+                    p = strsep(&buff, "@@@@@");
+                    while (p != nullptr) {
+                        size_t length = strlen(p);
+                        if (length > 0) {
+                            ++count;
+                            LOGI("receive_data() %d : %s\n", count, p);
+                            if (count == 1) {
+                                // ARS-AL00
+                            } else if (count == 2) {
+                                // video/hevc
+                                char *name = findDecoderCodecName(
+                                        DO_SOMETHING_CODE_find_decoder_codec_name,
+                                        which_client, p, length);
+                                LOGI("receive_data()              name: %s\n", name);
+                                if (which_client == 1) {
+                                    mimeLength1 = length;
+                                    codecNameLength1 = strlen(name);
+                                    memset(mime1, '\0', 50);
+                                    memset(codecName1, '\0', 50);
+                                    //memcpy(mime1, p, mimeLength1);
+                                    //memcpy(codecName1, name, codecNameLength1);
+                                    memcpy(mime1, "video/avc", 9);
+                                    memcpy(codecName1, "OMX.qcom.video.decoder.avc", 26);
+                                } else if (which_client == 2) {
+                                    mimeLength2 = length;
+                                    codecNameLength2 = strlen(name);
+                                    memset(mime2, '\0', 50);
+                                    memset(codecName2, '\0', 50);
+                                    memcpy(mime2, p, mimeLength2);
+                                    memcpy(codecName2, name, codecNameLength2);
+                                }
+                                LOGI("receive_data()         codecName: %s\n", name);
+                            } else if (count == 3) {
+                                // 1080
+                                width = atoi(p);
+                                if (which_client == 1) {
+                                    width1 = width;
+                                } else if (which_client == 2) {
+                                    width2 = width;
+                                }
+                            } else if (count == 4) {
+                                // 2244
+                                height = atoi(p);
+                                if (which_client == 1) {
+                                    height1 = height;
+                                } else if (which_client == 2) {
+                                    height2 = height;
+                                }
+                            } else if (count == 5) {
+                                // 1
+                                orientation = atoi(p);
+                                if (which_client == 1) {
+                                    orientation1 = orientation;
+                                } else if (which_client == 2) {
+                                    orientation2 = orientation;
+                                }
+                            }
+                        }
+                        p = strsep(&buff, "@@@@@");
+                    }
+                }
+            }
+        }
+    }
+    // endregion
+
+    // region 先读取sps_pps数据
+    if (MEDIA_CODEC_GO_JNI) {
+        // 第一个sps_pps
+        ret = read_data_udp(client_sock_fd, 4, read_buffer, data_buffer);
+        if (ret == EXIT_SUCCESS) {
+            want_to_read_length = uint8tToInt(data_buffer);
+            ret = read_data_udp(client_sock_fd, want_to_read_length, read_buffer, data_buffer);
+            if (ret == EXIT_SUCCESS) {
+                setSpsPps(which_client, orientation, data_buffer, want_to_read_length);
+            }
+        }
+        // 第二个sps_pps
+        ret = read_data_udp(client_sock_fd, 4, read_buffer, data_buffer);
+        if (ret == EXIT_SUCCESS) {
+            want_to_read_length = uint8tToInt(data_buffer);
+            ret = read_data_udp(client_sock_fd, want_to_read_length, read_buffer, data_buffer);
+            if (ret == EXIT_SUCCESS) {
+                if (orientation == 1) {
+                    setSpsPps(which_client, 2, data_buffer, want_to_read_length);
+                } else {
+                    setSpsPps(which_client, 1, data_buffer, want_to_read_length);
+                }
+            }
+        }
+
+        setOrientation(which_client, orientation);
+        createMediaCodec(which_client);
+        createMediaFormat(which_client, orientation);
+        startMediaCodec(which_client, 0);
+    }
+    // endregion
+
+    //Alexander Test
+    //usleep(1000*1000*10);
+
+    LOGI("receive_data() start which_client: %d\n", which_client);
+    // region 读取数据
+    for (;;) {
+        // 从套接字中读取数据放到缓冲区buffer中
+        //memset(buffer, 0, sizeof(buffer));
+        ret = read_data_udp(client_sock_fd, 4, read_buffer, data_buffer);
+        if (ret == EXIT_SUCCESS) {
+            want_to_read_length = uint8tToInt(data_buffer);
+            if (want_to_read_length <= 0 || want_to_read_length > 65506) {
+                LOGE("receive_data() which_client: %d want_to_read_length: %d\n",
+                     which_client, want_to_read_length);
+                continue;
+            }
+            if (want_to_read_length != 65506) {
+                ret = read_data_udp(client_sock_fd, want_to_read_length, read_buffer, data_buffer);
+            } else {
+                ret = read_data_udp(client_sock_fd, want_to_read_length, read_buffer, data_buffer);
+                memcpy(data_buffer_temp, data_buffer, want_to_read_length);
+                ret = read_data_udp(client_sock_fd, 4, read_buffer, data_buffer);
+                want_to_read_length = uint8tToInt(data_buffer);
+                ret = read_data_udp(client_sock_fd, want_to_read_length, read_buffer, data_buffer);
+                memcpy(data_buffer_temp + 65506, data_buffer, want_to_read_length);
+                memcpy(data_buffer, data_buffer_temp, 65506 + want_to_read_length);
+            }
+            if (ret == EXIT_SUCCESS) {
+                //LOGI("receive_data() data_buffer[0]: %d\n", data_buffer[0]);
+                if (data_buffer[0] == 255) {
+                    LOGI("receive_data() which_client: %d orientation: 1\n", which_client);
+                    changeWindow(which_client, 1);
+                    if (MEDIA_CODEC_GO_JNI) {
+                        setOrientation(which_client, 1);
+                    }
+                    continue;
+                } else if (data_buffer[0] == 254) {
+                    LOGI("receive_data() which_client: %d orientation: 2\n", which_client);
+                    changeWindow(which_client, 2);
+                    if (MEDIA_CODEC_GO_JNI) {
+                        setOrientation(which_client, 2);
+                    }
+                    continue;
+                }
+
+                if (MEDIA_CODEC_GO_JNI) {
+                    putData(which_client, data_buffer, want_to_read_length);
+                } else {
+                    // data_buffer want_to_read_length
+                    // 把data_buffer传递到java层
+                    putDataToJava(which_client, data_buffer, want_to_read_length);
+                }
+                continue;
+            } else {
+                LOGE("receive_data() break 1 which_client: %d\n", which_client);
+                break;
+            }
+        } else {
+            LOGE("receive_data() break 2 which_client: %d\n", which_client);
+            break;
+        }
+    }
+    // endregion
+    LOGI("receive_data() end   which_client: %d\n", which_client);
+
+    switch (which_client) {
+        case 1: {
+            close_client_sock(&client_sock_fd1);
+            if (MEDIA_CODEC_GO_JNI) {
+                isPlaying1 = false;
+                pthread_mutex_lock(&mutex1);
+                pthread_cond_signal(&cond1);
+                pthread_mutex_unlock(&mutex1);
+            }
+            break;
+        }
+        case 2: {
+            close_client_sock(&client_sock_fd2);
+            if (MEDIA_CODEC_GO_JNI) {
+                isPlaying2 = false;
+                pthread_mutex_lock(&mutex2);
+                pthread_cond_signal(&cond2);
+                pthread_mutex_unlock(&mutex2);
+            }
+            break;
+        }
+    }
+
+    // 通知Java有设备断开连接了
+    LOGI("receive_data() disconnect which_client: %d\n", which_client);
+    disconnect(which_client);
+}
+
+/*
+
+int recvfrom(int sockfd, void * buf, size_t len, int flags, struct sockaddr * src_addr, socklen_t * addrlen);
+
+int sendto(int sockfd, const void * buf, size_t len, int flags, const struct sockaddr * dest_addr, socklen_t addrlen);
+UDP套接字不会保持连接状态，每次传输数据都要添加目标地址信息，这相当于在邮寄包裹前填写收件人地址。
+
+recvfrom用于接收数据，sendto用于发送数据
+
+recvfrom：
+sockfd：用于接收UDP数据的套接字；
+buf：保存接收数据的缓冲区地址；
+len：可接收的最大字节数（不能超过buf缓冲区的大小）；
+flags：可选项参数，若没有可传递0；
+src_addr：存有发送端地址信息的sockaddr结构体变量的地址；
+addrlen：保存参数 src_addr的结构体变量长度的变量地址值。
+
+sendto：
+sockfd：用于传输UDP数据的套接字；
+buf：保存待传输数据的缓冲区地址；
+len：带传输数据的长度（以字节计）；
+flags：可选项参数，若没有可传递0；
+dest_addr：存有目标地址信息的 sockaddr 结构体变量的地址；
+addrlen：传递给参数 dest_addr的地址值结构体变量的长度。
+
+ */

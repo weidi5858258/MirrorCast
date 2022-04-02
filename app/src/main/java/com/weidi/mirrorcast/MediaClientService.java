@@ -92,7 +92,7 @@ public class MediaClientService extends Service {
         super.onDestroy();
     }
 
-    private static final String TAG = "player_alexander";
+    private static final String TAG = "MediaClientService";
     private WindowManager mWindowManager;
     private DisplayMetrics mDisplayMetrics;
     private View mView;
@@ -839,13 +839,15 @@ public class MediaClientService extends Service {
         /*IP = "192.168.1.102";
         PORT = 5858;*/
 
+        Log.i(TAG, "startRecordScreenForJni() sb: " + sb.toString() + " length: " + sb.length());
         Log.i(TAG, "startRecordScreenForJni() IP: " + IP + " PORT: " + PORT);
         JniObject jniObject = JniObject.obtain();
         jniObject.valueIntArray = new int[]{
                 sb.length(), tempOrientation, width, height, PORT};
         jniObject.valueStringArray = new String[]{
                 sb.toString(), mVideoMime, mVideoEncoderCodecName, IP};
-        String str = mMyJni.onTransact(MyJni.DO_SOMETHING_CODE_start_record_screen_prepare, jniObject);
+        String str = mMyJni.onTransact(
+                MyJni.DO_SOMETHING_CODE_start_record_screen_prepare, jniObject);
         if (TextUtils.isEmpty(str)) {
             return false;
         }

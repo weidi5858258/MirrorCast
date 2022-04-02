@@ -14,3 +14,7 @@ void client_disconnect();
 ssize_t send_data(uint8_t *data_buffer, ssize_t length);
 
 void set_client_info(const char *info, int length);
+
+bool client_connect_udp();
+
+ssize_t send_data_udp(uint8_t *data_buffer, ssize_t length);
