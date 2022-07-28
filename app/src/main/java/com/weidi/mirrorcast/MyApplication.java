@@ -20,6 +20,7 @@ public class MyApplication extends Application {
     @Override
     public void onCreate() {
         super.onCreate();
+        Phone.setContext(this.getApplicationContext());
         MyJni.getDefault().setContext(this.getApplicationContext());
         MyJni.getDefault().onTransact(MyJni.DO_SOMETHING_CODE_init, null);
     }

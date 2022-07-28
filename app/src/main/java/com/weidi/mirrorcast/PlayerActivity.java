@@ -27,7 +27,7 @@ import java.util.Arrays;
 import androidx.appcompat.app.AppCompatActivity;
 
 import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_set_surface;
-import static com.weidi.mirrorcast.MyJni.DECODER_MEDIA_CODEC_GO_JNI;
+import static com.weidi.mirrorcast.MyJni.USE_MEDIACODEC_FOR_JNI;
 
 public class PlayerActivity extends AppCompatActivity {
 
@@ -427,7 +427,7 @@ public class PlayerActivity extends AppCompatActivity {
                 }
                 if (!mWindow1IsPlaying) {
                     mWindow1IsPlaying = true;
-                    if (DECODER_MEDIA_CODEC_GO_JNI) {
+                    if (USE_MEDIACODEC_FOR_JNI) {
                         addView(MSG_UI_ADD_VIEW, 1);
                     } else {
                         if (prepare1()) {
@@ -449,7 +449,7 @@ public class PlayerActivity extends AppCompatActivity {
                 }
                 if (!mWindow2IsPlaying) {
                     mWindow2IsPlaying = true;
-                    if (DECODER_MEDIA_CODEC_GO_JNI) {
+                    if (USE_MEDIACODEC_FOR_JNI) {
                         addView(MSG_UI_ADD_VIEW, 2);
                     } else {
                         if (prepare2()) {
@@ -1376,7 +1376,7 @@ public class PlayerActivity extends AppCompatActivity {
 
         switch (which_client) {
             case 1: {
-                if (DECODER_MEDIA_CODEC_GO_JNI) {
+                if (USE_MEDIACODEC_FOR_JNI) {
                     JniObject jniObject = JniObject.obtain();
                     jniObject.valueInt = which_client;
                     jniObject.valueObject = mSurfaceView1.getHolder().getSurface();
@@ -1425,7 +1425,7 @@ public class PlayerActivity extends AppCompatActivity {
                 break;
             }
             case 2: {
-                if (DECODER_MEDIA_CODEC_GO_JNI) {
+                if (USE_MEDIACODEC_FOR_JNI) {
                     JniObject jniObject = JniObject.obtain();
                     jniObject.valueInt = which_client;
                     jniObject.valueObject = mSurfaceView2.getHolder().getSurface();

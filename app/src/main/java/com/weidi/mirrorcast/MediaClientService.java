@@ -14,11 +14,9 @@ import android.media.MediaCodecInfo;
 import android.media.MediaFormat;
 import android.media.projection.MediaProjection;
 import android.os.Build;
-import android.os.Handler;
-import android.os.HandlerThread;
 import android.os.IBinder;
-import android.os.Looper;
 import android.os.Message;
+import android.os.SystemClock;
 import android.provider.Settings;
 import android.text.TextUtils;
 import android.util.DisplayMetrics;
@@ -31,6 +29,7 @@ import android.view.View;
 import android.view.WindowManager;
 import android.widget.Toast;
 
+import java.lang.ref.WeakReference;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -56,7 +55,9 @@ import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_is_recording;
 import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_release_sps_pps;
 import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_start_record_screen;
 import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_stop_record_screen;
-import static com.weidi.mirrorcast.MyJni.ENCODER_MEDIA_CODEC_GO_JNI;
+import static com.weidi.mirrorcast.MyJni.USE_MEDIACODEC_FOR_JNI;
+import static com.weidi.mirrorcast.MyJni.USE_TCP;
+import static com.weidi.mirrorcast.MyJni.USE_TRANSMISSION_FOR_JNI;
 
 public class MediaClientService extends Service {
 
@@ -99,7 +100,7 @@ public class MediaClientService extends Service {
 
     private void internalOnCreate() {
         Log.i(TAG, "MediaClientService internalOnCreate()");
-        EventBusUtils.register(this);
+        Phone.register(this);
         mContext = getApplicationContext();
         mMyJni = MyJni.getDefault();
         // 为了进程保活
@@ -138,7 +139,7 @@ public class MediaClientService extends Service {
         ORIENTATION_PORTRAIT[4] = -1;// 服务端读到"-1"表示需要竖屏
         ORIENTATION_LANDSCAPE[4] = -2;// 服务端读到"-2"表示需要横屏
 
-        mUiHandler = new Handler(Looper.getMainLooper()) {
+        /*mUiHandler = new Handler(Looper.getMainLooper()) {
             @Override
             public void handleMessage(Message msg) {
                 MediaClientService.this.uiHandleMessage(msg);
@@ -151,7 +152,7 @@ public class MediaClientService extends Service {
             public void handleMessage(Message msg) {
                 MediaClientService.this.threadHandleMessage(msg);
             }
-        };
+        };*/
 
         UiModeManager uiModeManager =
                 (UiModeManager) getSystemService(Context.UI_MODE_SERVICE);
@@ -176,28 +177,28 @@ public class MediaClientService extends Service {
             enable = false;
             myOrientationListener.disable();
         }
-        if (mHandlerThread != null) {
+        /*if (mHandlerThread != null) {
             mHandlerThread.quitSafely();
-        }
-        if (ENCODER_MEDIA_CODEC_GO_JNI) {
+        }*/
+        if (USE_MEDIACODEC_FOR_JNI) {
             // notify to jni for free sps_pps
             mMyJni.onTransact(DO_SOMETHING_CODE_release_sps_pps, null);
         }
-        EventBusUtils.unregister(this);
+        Phone.unregister(this);
     }
 
     ////////////////////////////////////////////////////////////////////////////
 
     public static final String FLAG = "@@@@@";
 
-    private Activity mActivity;
+    private WeakReference<Activity> mReference;
     private Context mContext;
     private MyJni mMyJni;
 
     private Object lock = new Object();
     private boolean mIsRecording = false;
     private boolean mIsConnected = false;
-    private boolean allowSendOrientation = false;
+    private boolean mAllowSendOrientation = false;
     private boolean mIsHandlingPortrait = false;
     private boolean mIsHandlingLandscape = false;
     private final Lock lockPortrait = new ReentrantLock();
@@ -206,14 +207,17 @@ public class MediaClientService extends Service {
     private final Condition conditionLandscape = lockLandscape.newCondition();
     private MediaProjection mMediaProjection;
     private VirtualDisplay mVirtualDisplay;
+    // 代表什么设备? 手机,平板,电视,手表
     private int whatIsDevice = 1;
 
-    private HandlerThread mHandlerThread;
+    /*private HandlerThread mHandlerThread;
     private Handler mThreadHandler;
-    private Handler mUiHandler;
+    private Handler mUiHandler;*/
 
+    // 竖屏宽高
     private int mScreenWidthPortrait;
     private int mScreenHeightPortrait;
+    // 横屏宽高
     private int mScreenWidthLandscape;
     private int mScreenHeightLandscape;
     private Surface mSurfacePortrait;
@@ -240,14 +244,21 @@ public class MediaClientService extends Service {
     private boolean mIsKeyFrameWritePortrait = false;
     private boolean mIsKeyFrameWriteLandscape = false;
 
+    private MediaClient mClient;
+
     private Object onEvent(int what, Object[] objArray) {
         Object result = null;
         switch (what) {
             case SET_ACTIVITY: {
                 if (objArray != null && objArray.length > 0) {
-                    mActivity = (Activity) objArray[0];
+                    Activity activity = (Activity) objArray[0];
+                    mReference = new WeakReference<>(activity);
                 } else {
-                    mActivity = null;
+                    if (mReference != null) {
+                        Activity activity = mReference.get();
+                        activity = null;
+                        mReference = null;
+                    }
                 }
                 break;
             }
@@ -258,13 +269,13 @@ public class MediaClientService extends Service {
                     if (mMediaProjection != null) {
                         mMediaProjection.stop();
                         mMediaProjection.unregisterCallback(mMediaProjectionCallback);
+                        mMediaProjection = null;
                     }
-                    mMediaProjection = null;
                 }
                 break;
             }
             case IS_RECORDING: {
-                if (ENCODER_MEDIA_CODEC_GO_JNI) {
+                if (USE_MEDIACODEC_FOR_JNI) {
                     String str = mMyJni.onTransact(DO_SOMETHING_CODE_is_recording, null);
                     if (TextUtils.isEmpty(str)) {
                         return false;
@@ -281,18 +292,36 @@ public class MediaClientService extends Service {
                 break;
             }
             case START_RECORD_SCREEN: {
-                mThreadHandler.removeMessages(START_RECORD_SCREEN);
-                mThreadHandler.sendEmptyMessageDelayed(START_RECORD_SCREEN, 500);
+                if (USE_MEDIACODEC_FOR_JNI) {
+                    if (!startRecordScreenForJni()) {
+                        stopRecordScreenForJni();
+                    }
+                    break;
+                }
+                if ((whatIsDevice != Configuration.UI_MODE_TYPE_TELEVISION)
+                        ? prepare()
+                        : prepareForTV()) {
+                    new Thread(new Runnable() {
+                        @Override
+                        public void run() {
+                            startRecordScreen();
+                        }
+                    }).start();
+                } else {
+                    stopRecordScreen();
+                }
                 break;
             }
             case STOP_RECORD_SCREEN: {
-                mThreadHandler.removeMessages(STOP_RECORD_SCREEN);
-                mThreadHandler.sendEmptyMessageDelayed(STOP_RECORD_SCREEN, 500);
+                if (USE_MEDIACODEC_FOR_JNI) {
+                    stopRecordScreenForJni();
+                    break;
+                }
+                stopRecordScreen();
                 break;
             }
             case RELEASE: {
-                mThreadHandler.removeMessages(RELEASE);
-                mThreadHandler.sendEmptyMessageDelayed(RELEASE, 500);
+                releaseAll();
                 break;
             }
             case ACCELEROMETER_ROTATION: {
@@ -307,22 +336,18 @@ public class MediaClientService extends Service {
                 break;
             }
             case DO_SOMETHING_CODE_find_createPortraitVirtualDisplay: {
-                if (mActivity != null) {
-                    mActivity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
-                }
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
                 createPortraitVirtualDisplay();
                 break;
             }
             case DO_SOMETHING_CODE_find_createLandscapeVirtualDisplay: {
-                if (mActivity != null) {
-                    mActivity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
-                }
+                setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
                 createLandscapeVirtualDisplay();
                 break;
             }
             case DO_SOMETHING_CODE_find_encoder_send_data_error: {
                 releaseAll();
-                EventBusUtils.post(MainActivity.class, MAINACTIVITY_ON_RESUME, null);
+                Phone.call(MainActivity.class.getName(), MAINACTIVITY_ON_RESUME, null);
                 break;
             }
             default:
@@ -352,7 +377,7 @@ public class MediaClientService extends Service {
 
         switch (msg.what) {
             case START_RECORD_SCREEN: {
-                if (ENCODER_MEDIA_CODEC_GO_JNI) {
+                if (USE_MEDIACODEC_FOR_JNI) {
                     startRecordScreenForJni();
                     return;
                 }
@@ -366,7 +391,7 @@ public class MediaClientService extends Service {
                 break;
             }
             case STOP_RECORD_SCREEN: {
-                if (ENCODER_MEDIA_CODEC_GO_JNI) {
+                if (USE_MEDIACODEC_FOR_JNI) {
                     stopRecordScreenForJni();
                     return;
                 }
@@ -384,15 +409,18 @@ public class MediaClientService extends Service {
 
     private synchronized void releaseAll() {
         Log.i(TAG, "releaseAll start");
-        mActivity = null;
         mIsRecording = false;
         mIsConnected = false;
-        allowSendOrientation = false;
+        mAllowSendOrientation = false;
         mIsHandlingPortrait = false;
         mIsHandlingLandscape = false;
         mIsKeyFrameWritePortrait = false;
         mIsKeyFrameWriteLandscape = false;
-
+        if (mReference != null) {
+            Activity activity = mReference.get();
+            activity = null;
+            mReference = null;
+        }
         if (mMediaProjection != null) {
             mMediaProjection.stop();
             mMediaProjection.unregisterCallback(mMediaProjectionCallback);
@@ -412,7 +440,6 @@ public class MediaClientService extends Service {
         mSurfaceLandscape = null;
         mVideoEncoderCodecName = null;
         mVideoMime = null;
-
         if (mPlayQueue != null) {
             mPlayQueue.clear();
             mPlayQueue = null;
@@ -420,11 +447,8 @@ public class MediaClientService extends Service {
         Log.i(TAG, "releaseAll end");
     }
 
-    private boolean prepare() {
-        if (mActivity == null) {
-            Log.e(TAG, "prepare() return for activity is null");
-            return false;
-        }
+    private synchronized boolean prepare() {
+        Log.i(TAG, "prepare() start");
         if (mMediaProjection == null) {
             Log.e(TAG, "prepare() return for mMediaProjection is null");
             return false;
@@ -434,9 +458,9 @@ public class MediaClientService extends Service {
             return false;
         }
 
-        Log.i(TAG, "prepare() start");
         mIsRecording = false;
         mIsConnected = false;
+        mClient = MediaClient.getInstance();
 
         if (TextUtils.isEmpty(mVideoEncoderCodecName)) {
             mVideoEncoderCodecName = findEncoderCodecName(MediaFormat.MIMETYPE_VIDEO_AVC);
@@ -451,19 +475,23 @@ public class MediaClientService extends Service {
             releaseAll();
             return false;
         }
-        Log.i(TAG, "prepare() mVideoEncoderCodecName: " + mVideoEncoderCodecName);
+        Log.i(TAG, "prepare() mVideoEncoderCodecName: " + mVideoEncoderCodecName
+                + " mVideoMime: " + mVideoMime);
 
         MediaFormat format1 = null;
         MediaFormat format2 = null;
         int width = 0;
         int height = 0;
+        // prepare时如果屏幕是竖屏,那么就先强制设置一下为竖屏,这样之后即使把手机横放,屏幕还是竖屏的.
+        // 不然此时横竖屏不断的切换,不好处理.
+        // 等到开始真正能投屏了,再进行横竖屏的切换.
         mPreOrientation = mCurOrientation = getResources().getConfiguration().orientation;
         mDisplayMetrics = new DisplayMetrics();
         mWindowManager.getDefaultDisplay().getRealMetrics(mDisplayMetrics);
         int tempOrientation = mCurOrientation;
         if (tempOrientation == Configuration.ORIENTATION_PORTRAIT) {
             // 竖屏
-            mActivity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
             mScreenWidthPortrait = mDisplayMetrics.widthPixels;
             mScreenHeightPortrait = mDisplayMetrics.heightPixels;
             mScreenWidthLandscape = mScreenHeightPortrait;
@@ -510,7 +538,7 @@ public class MediaClientService extends Service {
             format2.setInteger(MediaFormat.KEY_MAX_HEIGHT, width);
         } else if (tempOrientation == Configuration.ORIENTATION_LANDSCAPE) {
             // 横屏
-            mActivity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
             mScreenWidthLandscape = mDisplayMetrics.widthPixels;
             mScreenHeightLandscape = mDisplayMetrics.heightPixels;
             mScreenWidthPortrait = mScreenHeightLandscape;
@@ -565,9 +593,9 @@ public class MediaClientService extends Service {
         }
 
         format1.setInteger(MediaFormat.KEY_MAX_INPUT_SIZE, width * height);
-        format1.setInteger(MediaFormat.KEY_BIT_RATE, 10000000);// maxBps * 1024 8000000
-        format1.setInteger(MediaFormat.KEY_FRAME_RATE, 25);// fps
-        format1.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1);// ifi
+        format1.setInteger(MediaFormat.KEY_BIT_RATE, 10000000);  // maxBps * 1024 8000000
+        format1.setInteger(MediaFormat.KEY_FRAME_RATE, 25);      // fps
+        format1.setInteger(MediaFormat.KEY_I_FRAME_INTERVAL, 1); // ifi
         format1.setInteger(MediaFormat.KEY_COLOR_FORMAT,
                 MediaCodecInfo.CodecCapabilities.COLOR_FormatSurface);
         //format1.setLong(MediaFormat.KEY_REPEAT_PREVIOUS_FRAME_AFTER, 1000000 / 45);
@@ -598,9 +626,10 @@ public class MediaClientService extends Service {
         format2.setInteger(MediaFormat.KEY_BITRATE_MODE,
                 MediaCodecInfo.EncoderCapabilities.BITRATE_MODE_VBR);
 
+        // 配置MediaCodec
         if (tempOrientation == Configuration.ORIENTATION_PORTRAIT) {
-            mVideoEncoderMediaFormatPortrait = format1;// 竖屏
-            mVideoEncoderMediaFormatLandscape = format2;// 横屏
+            mVideoEncoderMediaFormatPortrait = format1;  // 竖屏
+            mVideoEncoderMediaFormatLandscape = format2; // 横屏
             try {
                 mVideoEncoderMediaCodecPortrait =
                         MediaCodec.createByCodecName(mVideoEncoderCodecName);
@@ -621,8 +650,8 @@ public class MediaClientService extends Service {
                 return false;
             }
         } else if (tempOrientation == Configuration.ORIENTATION_LANDSCAPE) {
-            mVideoEncoderMediaFormatLandscape = format1;// 横屏
-            mVideoEncoderMediaFormatPortrait = format2;// 竖屏
+            mVideoEncoderMediaFormatLandscape = format1; // 横屏
+            mVideoEncoderMediaFormatPortrait = format2;  // 竖屏
             try {
                 mVideoEncoderMediaCodecLandscape =
                         MediaCodec.createByCodecName(mVideoEncoderCodecName);
@@ -652,11 +681,14 @@ public class MediaClientService extends Service {
         return true;
     }
 
-    private boolean prepareForTV() {
-        if (mActivity == null) {
-            Log.e(TAG, "prepareForTV() return for activity is null");
-            return false;
-        }
+    /**
+     * 把电视屏幕内容投给其他安卓设备
+     * 电视只有横屏
+     *
+     * @return
+     */
+    private synchronized boolean prepareForTV() {
+        Log.i(TAG, "prepareForTV() start");
         if (mMediaProjection == null) {
             Log.e(TAG, "prepareForTV() return for mMediaProjection is null");
             return false;
@@ -666,9 +698,9 @@ public class MediaClientService extends Service {
             return false;
         }
 
-        Log.i(TAG, "prepareForTV() start");
         mIsRecording = false;
         mIsConnected = false;
+        mClient = MediaClient.getInstance();
 
         if (TextUtils.isEmpty(mVideoEncoderCodecName)) {
             // OMX.qcom.video.encoder.hevc
@@ -687,14 +719,15 @@ public class MediaClientService extends Service {
             releaseAll();
             return false;
         }
-        Log.i(TAG, "prepareForTV() mVideoEncoderCodecName: " + mVideoEncoderCodecName);
+        Log.i(TAG, "prepareForTV() mVideoEncoderCodecName: " + mVideoEncoderCodecName
+                + " mVideoMime: " + mVideoMime);
 
         // TV就是横屏,值为2
         mPreOrientation = mCurOrientation = getResources().getConfiguration().orientation;
         mDisplayMetrics = new DisplayMetrics();
         mWindowManager.getDefaultDisplay().getRealMetrics(mDisplayMetrics);
         // 横屏
-        mActivity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+        setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
         mScreenWidthLandscape = mDisplayMetrics.widthPixels;
         mScreenHeightLandscape = mDisplayMetrics.heightPixels;
         mScreenWidthPortrait = mScreenHeightLandscape;
@@ -762,17 +795,193 @@ public class MediaClientService extends Service {
         return true;
     }
 
+    private synchronized void startRecordScreen() {
+        if (mIsRecording) {
+            Log.w(TAG, "startRecordScreen() return");
+            return;
+        }
+
+        Log.i(TAG, "startRecordScreen()");
+
+        // 启动编码器(我设计了一个横屏编码器和一个竖屏编码器,这样横竖屏才能切换),接下去就是先获得sps和pps.
+        if (whatIsDevice != Configuration.UI_MODE_TYPE_TELEVISION) {
+            mSurfaceLandscape = mVideoEncoderMediaCodecLandscape.createInputSurface();
+            mVideoEncoderMediaCodecLandscape.start();
+            mSurfacePortrait = mVideoEncoderMediaCodecPortrait.createInputSurface();
+            mVideoEncoderMediaCodecPortrait.start();
+        } else {
+            // 电视机只需要横屏编码器,因为只有横屏
+            mSurfaceLandscape = mVideoEncoderMediaCodecLandscape.createInputSurface();
+            mVideoEncoderMediaCodecLandscape.start();
+        }
+
+        /***
+         通过mSurface的串联，把mMediaProjection的输出内容放到了mSurface里面，
+         而mSurface正是mVideoEncoderMediaCodec的输入源，
+         这样就完成了对mMediaProjection输出内容的编码，
+         也就是屏幕采集数据的编码
+         */
+        mMediaProjection.registerCallback(mMediaProjectionCallback, Phone.getThreadHandler());
+
+        // 获取横竖屏的sps和pps
+        int tempOrientation = mCurOrientation;
+        if (sps_pps_portrait == null || sps_pps_landscape == null) {
+            if (whatIsDevice != Configuration.UI_MODE_TYPE_TELEVISION) {
+                getSpsPps();
+            } else {
+                getSpsPpsForTV();
+            }
+        } else {
+            if (tempOrientation == Configuration.ORIENTATION_PORTRAIT) {
+                mIsHandlingPortrait = true;
+                mIsHandlingLandscape = false;
+                createPortraitVirtualDisplay();
+            } else if (tempOrientation == Configuration.ORIENTATION_LANDSCAPE) {
+                mIsHandlingPortrait = false;
+                mIsHandlingLandscape = true;
+                createLandscapeVirtualDisplay();
+            }
+        }
+
+        Log.i(TAG, "startRecordScreen()" +
+                " mIsHandlingPortrait: " + mIsHandlingPortrait +
+                " mIsHandlingLandscape: " + mIsHandlingLandscape);
+        Log.d(TAG, "startRecordScreen()\n" + mVirtualDisplay.getDisplay());
+
+        String deviceName = Settings.Global.getString(
+                getContentResolver(), Settings.Global.DEVICE_NAME);
+        if (TextUtils.isEmpty(deviceName)) {
+            deviceName = "MirrorCast";
+        }
+
+        // 先向服务端发送配置信息,服务端拿到这些信息可以先初始化一些东西
+        StringBuilder sb = new StringBuilder();
+        sb.append(deviceName);      // 设备名称
+        sb.append(FLAG);
+        sb.append(mVideoMime);      // mime
+        sb.append(FLAG);
+        if (tempOrientation == Configuration.ORIENTATION_PORTRAIT) {
+            sb.append(mScreenWidthPortrait);
+            sb.append(FLAG);
+            sb.append(mScreenHeightPortrait);
+        } else if (tempOrientation == Configuration.ORIENTATION_LANDSCAPE) {
+            sb.append(mScreenWidthLandscape);
+            sb.append(FLAG);
+            sb.append(mScreenHeightLandscape);
+        }
+        sb.append(FLAG);
+        sb.append(tempOrientation); // 横屏还是竖屏
+
+        Log.i(TAG, "startRecordScreen() sb: " + sb.toString() + " length: " + sb.length());
+        Log.i(TAG, "startRecordScreen() IP: " + IP + " PORT: " + PORT);
+        if (USE_TRANSMISSION_FOR_JNI) {
+            JniObject jniObject = JniObject.obtain();
+            jniObject.valueString = sb.toString();
+            jniObject.valueInt = sb.length();
+            mMyJni.onTransact(
+                    MyJni.DO_SOMETHING_CODE_Client_set_info, jniObject);
+            jniObject = null;
+
+            // 连接服务端
+            jniObject = JniObject.obtain();
+            jniObject.valueString = IP;
+            jniObject.valueInt = PORT;
+            String str = mMyJni.onTransact(
+                    MyJni.DO_SOMETHING_CODE_Client_connect, jniObject);
+            jniObject = null;
+            try {
+                mIsConnected = Boolean.parseBoolean(str);
+                if (!mIsConnected) {
+                    Phone.callUi(new Runnable() {
+                        @Override
+                        public void run() {
+                            Toast.makeText(
+                                    mContext, "没有连接上服务端", Toast.LENGTH_SHORT).show();
+                        }
+                    });
+                    setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR);
+                    return;
+                }
+            } catch (Exception e) {
+                Log.e(TAG, "startRecordScreen() Boolean.parseBoolean(str)");
+                stopRecordScreen();
+                return;
+            }
+        } else {
+            mClient.setIpAndPort(IP, PORT);
+            if (!mClient.connect()) {
+                Log.e(TAG, "startRecordScreen() return for connect failure");
+                return;
+            }
+            // 客户端的基本信息
+            mClient.sendDataForUDP_Str(sb.toString(), tempOrientation);
+        }
+
+        mIsRecording = true;
+        mAllowSendOrientation = false;
+        if (whatIsDevice != Configuration.UI_MODE_TYPE_TELEVISION) {
+            if (tempOrientation == Configuration.ORIENTATION_PORTRAIT) {
+                if (USE_TRANSMISSION_FOR_JNI) {
+                    sendData(sps_pps_portrait);
+                    sendData(sps_pps_landscape);
+                } else {
+                    // portrait
+                    mClient.sendDataForUDP_Sps_Pps(sps_pps_portrait, true);
+                    // landscape
+                    mClient.sendDataForUDP_Sps_Pps(sps_pps_landscape, false);
+                }
+            } else if (tempOrientation == Configuration.ORIENTATION_LANDSCAPE) {
+                if (USE_TRANSMISSION_FOR_JNI) {
+                    sendData(sps_pps_landscape);
+                    sendData(sps_pps_portrait);
+                } else {
+                    // landscape
+                    mClient.sendDataForUDP_Sps_Pps(sps_pps_landscape, false);
+                    // portrait
+                    mClient.sendDataForUDP_Sps_Pps(sps_pps_portrait, true);
+                }
+            }
+
+            // UDP测试时,这里需要延时一下,等待服务端初始化完成
+            SystemClock.sleep(2000);
+
+            new Thread(new VideoDataEncodePortraitRunnable()).start();
+            new Thread(new VideoDataEncodeLandscapeRunnable()).start();
+        } else {
+            sendData(sps_pps_landscape);
+            sendData(sps_pps_portrait);
+            new Thread(new VideoDataEncodeLandscapeRunnable()).start();
+        }
+        mAllowSendOrientation = true;
+    }
+
+    private synchronized void stopRecordScreen() {
+        Log.i(TAG, "stopRecordScreen() start");
+        mIsRecording = false;
+        lockPortrait.lock();
+        conditionPortrait.signal();
+        lockPortrait.unlock();
+        lockLandscape.lock();
+        conditionLandscape.signal();
+        lockLandscape.unlock();
+        // 断开服务端
+        mMyJni.onTransact(MyJni.DO_SOMETHING_CODE_Client_disconnect, null);
+        releaseAll();
+        Log.i(TAG, "stopRecordScreen() end");
+    }
+
     private synchronized boolean startRecordScreenForJni() {
-        if (mActivity == null) {
+        Log.i(TAG, "startRecordScreenForJni() start");
+
+        /*if (mActivity == null) {
             Log.e(TAG, "startRecordScreenForJni() return for activity is null");
             return false;
-        }
+        }*/
+
         if (mMediaProjection == null) {
             Log.e(TAG, "startRecordScreenForJni() return for mMediaProjection is null");
             return false;
         }
-
-        Log.i(TAG, "startRecordScreenForJni() start");
 
         if (TextUtils.isEmpty(mVideoEncoderCodecName)) {
             mVideoEncoderCodecName = findEncoderCodecName(MediaFormat.MIMETYPE_VIDEO_AVC);
@@ -787,7 +996,8 @@ public class MediaClientService extends Service {
             releaseAll();
             return false;
         }
-        Log.i(TAG, "startRecordScreenForJni() mVideoEncoderCodecName: " + mVideoEncoderCodecName);
+        Log.i(TAG, "startRecordScreenForJni() mVideoEncoderCodecName: " + mVideoEncoderCodecName
+                + " mVideoMime: " + mVideoMime);
 
         mPreOrientation = mCurOrientation = getResources().getConfiguration().orientation;
         mDisplayMetrics = new DisplayMetrics();
@@ -819,9 +1029,9 @@ public class MediaClientService extends Service {
         }
         // 先向服务端发送配置信息,服务端拿到这些信息可以先初始化一些东西
         StringBuilder sb = new StringBuilder();
-        sb.append(deviceName);// 设备名称
+        sb.append(deviceName); // 设备名称
         sb.append(FLAG);
-        sb.append(mVideoMime);// mime
+        sb.append(mVideoMime); // mime
         sb.append(FLAG);
         if (tempOrientation == Configuration.ORIENTATION_PORTRAIT) {
             sb.append(mScreenWidthPortrait);
@@ -833,14 +1043,14 @@ public class MediaClientService extends Service {
             sb.append(mScreenHeightLandscape);
         }
         sb.append(FLAG);
-        sb.append(tempOrientation);// 横屏还是竖屏
+        sb.append(tempOrientation); // 横屏还是竖屏
 
         // Test
         /*IP = "192.168.1.102";
         PORT = 5858;*/
 
-        Log.i(TAG, "startRecordScreenForJni() sb: " + sb.toString() + " length: " + sb.length());
         Log.i(TAG, "startRecordScreenForJni() IP: " + IP + " PORT: " + PORT);
+        Log.i(TAG, "startRecordScreenForJni() sb: " + sb.toString() + " length: " + sb.length());
         JniObject jniObject = JniObject.obtain();
         jniObject.valueIntArray = new int[]{
                 sb.length(), tempOrientation, width, height, PORT};
@@ -853,15 +1063,14 @@ public class MediaClientService extends Service {
         }
         boolean ret = Boolean.parseBoolean(str);
         if (!ret) {
-            mUiHandler.post(new Runnable() {
+            Phone.callUi(new Runnable() {
                 @Override
                 public void run() {
                     Toast.makeText(
                             mContext, "没有连接上服务端", Toast.LENGTH_SHORT).show();
                 }
             });
-            mActivity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR);
-            mActivity = null;
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR);
             releaseAll();
             return false;
         }
@@ -869,11 +1078,11 @@ public class MediaClientService extends Service {
         mSurfacePortrait = (Surface) jniObject.valueObjectArray[0];
         mSurfaceLandscape = (Surface) jniObject.valueObjectArray[1];
 
-        mMediaProjection.registerCallback(mMediaProjectionCallback, mThreadHandler);
+        mMediaProjection.registerCallback(mMediaProjectionCallback, Phone.getThreadHandler());
 
-        allowSendOrientation = false;
+        mAllowSendOrientation = false;
         mMyJni.onTransact(DO_SOMETHING_CODE_start_record_screen, null);
-        allowSendOrientation = true;
+        mAllowSendOrientation = true;
         Log.i(TAG, "startRecordScreenForJni() end");
         return true;
     }
@@ -881,151 +1090,6 @@ public class MediaClientService extends Service {
     private synchronized void stopRecordScreenForJni() {
         mMyJni.onTransact(DO_SOMETHING_CODE_stop_record_screen, null);
         releaseAll();
-    }
-
-    private synchronized void startRecordScreen() {
-        if (mIsRecording) {
-            Log.w(TAG, "startRecordScreen() return");
-            return;
-        }
-
-        Log.i(TAG, "startRecordScreen()");
-
-        if (whatIsDevice != Configuration.UI_MODE_TYPE_TELEVISION) {
-            mSurfaceLandscape = mVideoEncoderMediaCodecLandscape.createInputSurface();
-            mVideoEncoderMediaCodecLandscape.start();
-            mSurfacePortrait = mVideoEncoderMediaCodecPortrait.createInputSurface();
-            mVideoEncoderMediaCodecPortrait.start();
-        } else {
-            mSurfaceLandscape = mVideoEncoderMediaCodecLandscape.createInputSurface();
-            mVideoEncoderMediaCodecLandscape.start();
-        }
-
-        /***
-         通过mSurface的串联，把mMediaProjection的输出内容放到了mSurface里面，
-         而mSurface正是mVideoEncoderMediaCodec的输入源，
-         这样就完成了对mMediaProjection输出内容的编码，
-         也就是屏幕采集数据的编码
-         */
-        mMediaProjection.registerCallback(mMediaProjectionCallback, mThreadHandler);
-
-        if (sps_pps_portrait == null || sps_pps_landscape == null) {
-            if (whatIsDevice != Configuration.UI_MODE_TYPE_TELEVISION) {
-                getSpsPps();
-            } else {
-                getSpsPpsForTV();
-            }
-        } else {
-            int tempOrientation = mCurOrientation;
-            if (tempOrientation == Configuration.ORIENTATION_PORTRAIT) {
-                mIsHandlingPortrait = true;
-                mIsHandlingLandscape = false;
-                createPortraitVirtualDisplay();
-            } else if (tempOrientation == Configuration.ORIENTATION_LANDSCAPE) {
-                mIsHandlingPortrait = false;
-                mIsHandlingLandscape = true;
-                createLandscapeVirtualDisplay();
-            }
-        }
-
-        Log.i(TAG, "startRecordScreen()" +
-                " mIsHandlingPortrait: " + mIsHandlingPortrait +
-                " mIsHandlingLandscape: " + mIsHandlingLandscape);
-        Log.d(TAG, "startRecordScreen()\n" + mVirtualDisplay.getDisplay());
-
-        String deviceName = Settings.Global.getString(
-                getContentResolver(), Settings.Global.DEVICE_NAME);
-        if (TextUtils.isEmpty(deviceName)) {
-            deviceName = "MirrorCast";
-        }
-
-        // 先向服务端发送配置信息,服务端拿到这些信息可以先初始化一些东西
-        int tempOrientation = mCurOrientation;
-        StringBuilder sb = new StringBuilder();
-        sb.append(deviceName);// 设备名称
-        sb.append(FLAG);
-        sb.append(mVideoMime);// mime
-        sb.append(FLAG);
-        if (tempOrientation == Configuration.ORIENTATION_PORTRAIT) {
-            sb.append(mScreenWidthPortrait);
-            sb.append(FLAG);
-            sb.append(mScreenHeightPortrait);
-        } else if (tempOrientation == Configuration.ORIENTATION_LANDSCAPE) {
-            sb.append(mScreenWidthLandscape);
-            sb.append(FLAG);
-            sb.append(mScreenHeightLandscape);
-        }
-        sb.append(FLAG);
-        sb.append(tempOrientation);// 横屏还是竖屏
-
-        JniObject jniObject = JniObject.obtain();
-        jniObject.valueString = sb.toString();
-        jniObject.valueInt = sb.length();
-        mMyJni.onTransact(
-                MyJni.DO_SOMETHING_CODE_Client_set_info, jniObject);
-        jniObject = null;
-
-        Log.i(TAG, "startRecordScreen() IP: " + IP + " PORT: " + PORT);
-        // 连接服务端
-        jniObject = JniObject.obtain();
-        jniObject.valueString = IP;
-        jniObject.valueInt = PORT;
-        String str = mMyJni.onTransact(
-                MyJni.DO_SOMETHING_CODE_Client_connect, jniObject);
-        jniObject = null;
-        try {
-            mIsConnected = Boolean.parseBoolean(str);
-            if (!mIsConnected) {
-                mUiHandler.post(new Runnable() {
-                    @Override
-                    public void run() {
-                        Toast.makeText(
-                                mContext, "没有连接上服务端", Toast.LENGTH_SHORT).show();
-                    }
-                });
-                mActivity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR);
-                mActivity = null;
-                return;
-            }
-        } catch (Exception e) {
-            Log.e(TAG, "startRecordScreen() Boolean.parseBoolean(str)");
-            stopRecordScreen();
-            return;
-        }
-
-        mIsRecording = true;
-        allowSendOrientation = false;
-        if (whatIsDevice != Configuration.UI_MODE_TYPE_TELEVISION) {
-            if (tempOrientation == Configuration.ORIENTATION_PORTRAIT) {
-                sendData(sps_pps_portrait);
-                sendData(sps_pps_landscape);
-            } else if (tempOrientation == Configuration.ORIENTATION_LANDSCAPE) {
-                sendData(sps_pps_landscape);
-                sendData(sps_pps_portrait);
-            }
-            new Thread(new VideoDataEncodePortraitRunnable()).start();
-            new Thread(new VideoDataEncodeLandscapeRunnable()).start();
-        } else {
-            sendData(sps_pps_landscape);
-            sendData(sps_pps_portrait);
-            new Thread(new VideoDataEncodeLandscapeRunnable()).start();
-        }
-        allowSendOrientation = true;
-    }
-
-    private synchronized void stopRecordScreen() {
-        Log.i(TAG, "stopRecordScreen() start");
-        mIsRecording = false;
-        lockPortrait.lock();
-        conditionPortrait.signal();
-        lockPortrait.unlock();
-        lockLandscape.lock();
-        conditionLandscape.signal();
-        lockLandscape.unlock();
-        // 断开服务端
-        mMyJni.onTransact(MyJni.DO_SOMETHING_CODE_Client_disconnect, null);
-        releaseAll();
-        Log.i(TAG, "stopRecordScreen() end");
     }
 
     /***
@@ -1038,7 +1102,6 @@ public class MediaClientService extends Service {
             mVirtualDisplay = null;
         }
         mVirtualDisplay = mMediaProjection.createVirtualDisplay(
-                //TAG + "-Display",
                 "createPortraitVirtualDisplay",
                 mScreenWidthPortrait,
                 mScreenHeightPortrait,
@@ -1058,7 +1121,6 @@ public class MediaClientService extends Service {
             mVirtualDisplay = null;
         }
         mVirtualDisplay = mMediaProjection.createVirtualDisplay(
-                //TAG + "-Display",
                 "createLandscapeVirtualDisplay",
                 mScreenWidthLandscape,
                 mScreenHeightLandscape,
@@ -1084,9 +1146,15 @@ public class MediaClientService extends Service {
             public int handleOutputBuffer(ByteBuffer room, MediaCodec.BufferInfo roomInfo) {
                 room.position(roomInfo.offset);
                 room.limit(roomInfo.offset + roomInfo.size);
-                byte[] sps_pps = new byte[roomInfo.size + 4];
-                int2Bytes(sps_pps, roomInfo.size);
-                room.get(sps_pps, 4, roomInfo.size);
+                byte[] sps_pps = null;
+                if (USE_TCP) {
+                    sps_pps = new byte[roomInfo.size + 4];
+                    int2Bytes(sps_pps, roomInfo.size);
+                    room.get(sps_pps, 4, roomInfo.size);
+                } else {
+                    sps_pps = new byte[roomInfo.size];
+                    room.get(sps_pps, 0, roomInfo.size);
+                }
                 Log.i(TAG, "getSpsPps() video \nsps_pps: " + Arrays.toString(sps_pps));
                 if (tempOrientation == Configuration.ORIENTATION_PORTRAIT) {
                     if (sps_pps_portrait == null) {
@@ -1112,12 +1180,12 @@ public class MediaClientService extends Service {
         if (tempOrientation == Configuration.ORIENTATION_PORTRAIT) {
             mediaCodec = mVideoEncoderMediaCodecPortrait;
             // 强制竖屏(先得到竖屏的sps_pps)
-            mActivity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
             createPortraitVirtualDisplay();
         } else if (tempOrientation == Configuration.ORIENTATION_LANDSCAPE) {
             mediaCodec = mVideoEncoderMediaCodecLandscape;
             // 强制横屏(先得到横屏的sps_pps)
-            mActivity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
             createLandscapeVirtualDisplay();
         }
 
@@ -1131,12 +1199,12 @@ public class MediaClientService extends Service {
         if (tempOrientation == Configuration.ORIENTATION_PORTRAIT) {
             mediaCodec = mVideoEncoderMediaCodecLandscape;
             // 强制横屏(然后得到横屏的sps_pps)
-            mActivity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
             createLandscapeVirtualDisplay();
         } else if (tempOrientation == Configuration.ORIENTATION_LANDSCAPE) {
             mediaCodec = mVideoEncoderMediaCodecPortrait;
             // 强制竖屏(然后得到竖屏的sps_pps)
-            mActivity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
             createPortraitVirtualDisplay();
         }
 
@@ -1150,12 +1218,12 @@ public class MediaClientService extends Service {
         if (tempOrientation == Configuration.ORIENTATION_PORTRAIT) {
             mIsHandlingPortrait = true;
             mIsHandlingLandscape = false;
-            mActivity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT);
             createPortraitVirtualDisplay();
         } else if (tempOrientation == Configuration.ORIENTATION_LANDSCAPE) {
             mIsHandlingLandscape = true;
             mIsHandlingPortrait = false;
-            mActivity.setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
+            setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
             createLandscapeVirtualDisplay();
         }
     }
@@ -1198,50 +1266,78 @@ public class MediaClientService extends Service {
         room.position(roomInfo.offset);
         room.limit(roomInfo.offset + roomInfo.size);
 
-        byte[] frame = new byte[roomInfo.size + 6];
-        int2Bytes(frame, roomInfo.size + 2);
-        // 用于在接收端判断是否是关键帧
-        frame[roomInfo.size + 5] = (byte) roomInfo.flags;
-        // "1"表示竖屏, "2"表示横屏
-        frame[roomInfo.size + 4] = (byte) 1;
-        room.get(frame, 4, roomInfo.size);
+        byte[] frame = null;
+        if (USE_TCP) {
+            frame = new byte[roomInfo.size + 6];
+            int2Bytes(frame, roomInfo.size + 2);
+            // "1"表示竖屏, "2"表示横屏
+            frame[roomInfo.size + 4] = (byte) 1;
+            // 用于在接收端判断是否是关键帧
+            frame[roomInfo.size + 5] = (byte) roomInfo.flags;
+            room.get(frame, 4, roomInfo.size);
+        } else {
+            frame = new byte[roomInfo.size];
+            room.get(frame, 0, roomInfo.size);
+        }
 
         if (!mIsKeyFrameWritePortrait) {
             // for IDR frame
             if ((roomInfo.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0) {
                 mIsKeyFrameWritePortrait = true;
-                sendData(frame);
+                if (USE_TCP) {
+                    sendData(frame);
+                } else {
+                    mClient.sendDataForUDP(frame, 0, frame.length, true, roomInfo.flags);
+                }
                 return;
             }
             frame = null;
             return;
         }
 
-        sendData(frame);
+        if (USE_TCP) {
+            sendData(frame);
+        } else {
+            mClient.sendDataForUDP(frame, 0, frame.length, true, roomInfo.flags);
+        }
     }
 
     private void handleVideoOutputBufferLandscape(ByteBuffer room, MediaCodec.BufferInfo roomInfo) {
         room.position(roomInfo.offset);
         room.limit(roomInfo.offset + roomInfo.size);
 
-        byte[] frame = new byte[roomInfo.size + 6];
-        int2Bytes(frame, roomInfo.size + 2);
-        frame[roomInfo.size + 5] = (byte) roomInfo.flags;
-        frame[roomInfo.size + 4] = (byte) 2;
-        room.get(frame, 4, roomInfo.size);
+        byte[] frame = null;
+        if (USE_TCP) {
+            frame = new byte[roomInfo.size + 6];
+            int2Bytes(frame, roomInfo.size + 2);
+            frame[roomInfo.size + 4] = (byte) 2;
+            frame[roomInfo.size + 5] = (byte) roomInfo.flags;
+            room.get(frame, 4, roomInfo.size);
+        } else {
+            frame = new byte[roomInfo.size];
+            room.get(frame, 0, roomInfo.size);
+        }
 
         if (!mIsKeyFrameWriteLandscape) {
             // for IDR frame
             if ((roomInfo.flags & MediaCodec.BUFFER_FLAG_KEY_FRAME) != 0) {
                 mIsKeyFrameWriteLandscape = true;
-                sendData(frame);
+                if (USE_TCP) {
+                    sendData(frame);
+                } else {
+                    mClient.sendDataForUDP(frame, 0, frame.length, false, roomInfo.flags);
+                }
                 return;
             }
             frame = null;
             return;
         }
 
-        sendData(frame);
+        if (USE_TCP) {
+            sendData(frame);
+        } else {
+            mClient.sendDataForUDP(frame, 0, frame.length, false, roomInfo.flags);
+        }
     }
 
     private void fromPortraitToLandscape() {
@@ -1268,6 +1364,15 @@ public class MediaClientService extends Service {
         lockPortrait.unlock();
     }
 
+    private void setRequestedOrientation(int orientation) {
+        if (mReference != null) {
+            Activity activity = mReference.get();
+            if (activity != null) {
+                activity.setRequestedOrientation(orientation);
+            }
+        }
+    }
+
     /***
      isPortrait true表示frame是竖屏的数据,false表示frame是横屏的数据
      */
@@ -1279,15 +1384,18 @@ public class MediaClientService extends Service {
 
         // A
         // long start = SystemClock.uptimeMillis();
-        MyJni.clientFrame.valueByteArray = frame;
-        MyJni.clientFrame.valueInt = frame.length;
-        String info = mMyJni.onTransact(
-                MyJni.DO_SOMETHING_CODE_Client_send_data, MyJni.clientFrame);
-        int sendLength = Integer.valueOf(info);
-        if (sendLength <= 0) {
-            Log.e(TAG, "sendData() sendLength: " + sendLength);
-            stopRecordScreen();
-            EventBusUtils.post(MainActivity.class, MAINACTIVITY_ON_RESUME, null);
+        if (USE_TRANSMISSION_FOR_JNI) {
+            MyJni.clientFrame.valueByteArray = frame;
+            MyJni.clientFrame.valueInt = frame.length;
+            String info = mMyJni.onTransact(
+                    MyJni.DO_SOMETHING_CODE_Client_send_data, MyJni.clientFrame);
+            int sendLength = Integer.valueOf(info);
+            if (sendLength <= 0) {
+                Log.e(TAG, "sendData() sendLength: " + sendLength);
+                stopRecordScreenForJni();
+                Phone.call(MainActivity.class.getName(), MAINACTIVITY_ON_RESUME, null);
+            }
+            return;
         }
         // long end = SystemClock.uptimeMillis();
         // Log.i(TAG, "putDataToJava() video take time: " + (end - start));
@@ -1296,10 +1404,13 @@ public class MediaClientService extends Service {
     }
 
     // 根据mime查找编码器
-    private String findEncoderCodecName(String mime) {
+    private static String findEncoderCodecName(String mime) {
         String codecName = null;
         MediaCodecInfo[] mediaCodecInfos =
                 MediaUtils.findAllEncodersByMime(mime);
+        if (mediaCodecInfos == null) {
+            return codecName;
+        }
         for (MediaCodecInfo mediaCodecInfo : mediaCodecInfos) {
             if (mediaCodecInfo == null) {
                 continue;
@@ -1308,8 +1419,8 @@ public class MediaClientService extends Service {
             if (TextUtils.isEmpty(codecName)) {
                 continue;
             }
+
             String tempCodecName = codecName.toLowerCase();
-            // 硬解
             if (tempCodecName.startsWith("omx.google.")
                     || tempCodecName.startsWith("c2.android.")
                     // 用于加密的视频
@@ -1318,6 +1429,8 @@ public class MediaClientService extends Service {
                 codecName = null;
                 continue;
             }
+
+            // 硬解
             break;
 
             // 软解
@@ -1330,15 +1443,7 @@ public class MediaClientService extends Service {
         return codecName;
     }
 
-    private MediaProjection.Callback mMediaProjectionCallback =
-            new MediaProjection.Callback() {
-                @Override
-                public void onStop() {
-                    Log.i(TAG, "MediaProjection.Callback onStop()");
-                }
-            };
-
-    /***
+    /**
      * 将int转为长度为4的byte数组
      *
      * @param length
@@ -1350,6 +1455,14 @@ public class MediaClientService extends Service {
         frame[2] = (byte) (length >> 16);
         frame[3] = (byte) (length >> 24);
     }
+
+    private MediaProjection.Callback mMediaProjectionCallback =
+            new MediaProjection.Callback() {
+                @Override
+                public void onStop() {
+                    Log.i(TAG, "MediaProjection.Callback onStop()");
+                }
+            };
 
     public EDMediaCodec.Callback mEDMediaCodecCallback = new EDMediaCodec.Callback() {
 
@@ -1495,9 +1608,10 @@ public class MediaClientService extends Service {
         @Override
         public void onOrientationChanged(int orientation) {
             //Log.d(TAG, "orention" + orientation);
-            if (!allowSendOrientation) {
+            if (!mAllowSendOrientation) {
                 return;
             }
+
             if (((orientation >= 0) && (orientation < 45)) || (orientation > 315)) {
                 //Log.d(TAG, "设置竖屏");
                 mCurOrientation = Configuration.ORIENTATION_PORTRAIT;
@@ -1515,14 +1629,14 @@ public class MediaClientService extends Service {
             if (mPreOrientation != mCurOrientation) {
                 if (mPreOrientation == Configuration.ORIENTATION_PORTRAIT) {
                     // 竖屏 ---> 横屏
-                    if (ENCODER_MEDIA_CODEC_GO_JNI) {
+                    if (USE_MEDIACODEC_FOR_JNI) {
                         mMyJni.onTransact(DO_SOMETHING_CODE_fromPortraitToLandscape, null);
                     } else {
                         fromPortraitToLandscape();
                     }
                 } else {
                     // 横屏 ---> 竖屏
-                    if (ENCODER_MEDIA_CODEC_GO_JNI) {
+                    if (USE_MEDIACODEC_FOR_JNI) {
                         mMyJni.onTransact(DO_SOMETHING_CODE_fromLandscapeToPortrait, null);
                     } else {
                         fromLandscapeToPortrait();

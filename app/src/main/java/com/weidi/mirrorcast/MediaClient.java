@@ -1,5 +1,6 @@
 package com.weidi.mirrorcast;
 
+import android.content.res.Configuration;
 import android.media.AudioFormat;
 import android.media.AudioManager;
 import android.media.AudioTrack;
@@ -11,9 +12,14 @@ import android.util.Log;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
+import java.net.DatagramPacket;
+import java.net.DatagramSocket;
+import java.net.InetAddress;
 import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+
+import static com.weidi.mirrorcast.Constants.MAINACTIVITY_ON_RESUME;
 
 public class MediaClient {
 
@@ -22,19 +28,34 @@ public class MediaClient {
 
     private volatile static MediaClient sMediaClient;
 
+    private String ip = "192.168.49.1"; // "192.168.49.1"
+    private int port = 5858;
+    private boolean isConnected = false;
+
+    // TCP
     private Socket socket;
-    private String ip = "192.168.49.1";// "192.168.49.1"
     // 不使用
     private InputStream inputStream;
     // 向服务器发送数据
     private OutputStream outputStream;
-    public static boolean mIsConnected = false;
 
-    private MediaCodec mVideoMC;
-    private MediaCodec mAudioMC;
-    private MediaFormat mVideoMF;
-    private MediaFormat mAudioMF;
-    private AudioTrack mAudioTrack;
+    // UDP
+    // private static final int LIMIT = 65507;
+    // private static final int LIMIT_DATA = LIMIT - 7;
+
+    public static final int BUFFER_FLAG_KEY_FRAME = 3076 * 10;
+    public static final int BUFFER_FLAG_NOT_KEY_FRAME = 1024 * 10;
+    public static final int LIMIT = 1280 * 10; // 15360 12800 10240
+    public static final int OFFSET = 8;
+    public static final int LIMIT_DATA = LIMIT - OFFSET;
+    private DatagramSocket datagramSocket;
+    private InetAddress inetAddress;
+    private byte[] frame;
+    private DatagramPacket packet;
+
+    public AudioTrack getmAudioTrack() {
+        return mAudioTrack;
+    }
 
     private MediaClient() {
     }
@@ -50,80 +71,557 @@ public class MediaClient {
         return sMediaClient;
     }
 
-    public void setIp(String ipAddr) {
-        ip = ipAddr;
-        // ip = "localhost";
-        // ip = "192.168.0.100";
+    public void setIpAndPort(String ipAddr, int port) {
+        this.ip = ipAddr;
+        this.port = port;
     }
 
     public boolean connect() {
-        if (TextUtils.isEmpty(ip)
-                || socket != null
-                || inputStream != null
-                || outputStream != null) {
+        if (TextUtils.isEmpty(ip)) {
             Log.e(TAG, "MediaClient ip is empty");
             return false;
         }
 
-        int i = 0;
-        while (true) {
+        Log.i(TAG, "MediaClient connect()");
+        if (MyJni.USE_TCP) {
             try {
-                mIsConnected = false;
-                ip = "192.168.49." + (++i);
+                isConnected = false;
                 socket = new Socket(ip, MediaServer.PORT);
-                mIsConnected = true;
-                Log.i(TAG, "MediaClient connect() success ip: " + ip);
-                break;
-            } catch (Exception e) {
-                Log.e(TAG, "MediaClient connect() failure ip: " + ip);
-                continue;
-            }
-        }
-
-        if (mIsConnected) {
-            try {
                 inputStream = socket.getInputStream();
-            } catch (IOException e) {
-                e.printStackTrace();
-                Log.e(TAG, "MediaClient getInputStream() failure");
-                close();
-                return false;
-            }
-        }
-
-        if (mIsConnected) {
-            try {
                 outputStream = socket.getOutputStream();
+                isConnected = true;
+                Log.i(TAG, "MediaClient connect() tcp success ip: " + ip + " port: " + port);
+                return true;
+            } catch (Exception e) {
+                Log.e(TAG, "MediaClient connect() failure");
+                e.printStackTrace();
+                close();
+            }
+        } else {
+            try {
+                isConnected = false;
+                datagramSocket = new DatagramSocket(0);
+                datagramSocket.setSoTimeout(10000);
+                inetAddress = InetAddress.getByName(ip);
+                /*LIMIT = BUFFER_FLAG_NOT_KEY_FRAME;
+                LIMIT_DATA = LIMIT - OFFSET;*/
+                frame = new byte[LIMIT];
+                packet = new DatagramPacket(frame, LIMIT, inetAddress, port);
+                isConnected = true;
+                Log.i(TAG, "MediaClient connect() udp success ip: " + ip + " port: " + port);
+                return true;
             } catch (IOException e) {
                 e.printStackTrace();
-                Log.e(TAG, "MediaClient getOutputStream() failure");
                 close();
-                return false;
             }
-        }
-
-        if (mIsConnected) {
-            return true;
         }
 
         return false;
     }
 
-    public void sendData(byte[] data, int offsetInBytes, int sizeInBytes) {
-        if (outputStream != null) {
+    public synchronized void sendData(byte[] data, int offsetInBytes, int sizeInBytes) {
+        //  type:
+        //  "8"表示字符串
+        // "10"表示竖屏sps_pps
+        // "20"表示横屏sps_pps
+        // "30"表示完整帧(data小于65507,不需要拆分)
+        // "43"表示分2次发送,现在是第1次发送数据(40+2+1), "44"表示分2次发送,现在是第2次发送数据(40+2+2)
+        // "54"(50+3+1), "55"(50+3+2), "56"(50+3+3)
+        // "65"(60+4+1), "66"(60+4+2), "67"(60+4+3), "68"(60+4+4)
+
+        //   1/2: "1"表示竖屏, "2"表示横屏
+
+        // flags: 判断是否是关键帧
+        // 0                                   非视频帧
+        // MediaCodec.BUFFER_FLAG_CODEC_CONFIG 配置帧
+        // MediaCodec.BUFFER_FLAG_KEY_FRAME    关键帧
+
+        // 为什么要把"1/2","flags"和"type"排在后面呢?
+        // 原因是服务端接收到数据后,把数据送到MediaCodec解码时的offset在有些设备上只能是0或者1,因此排在了后面
+        // TCP: 4 + sizeInBytes + 1/2 + flags        [sizeInBytes+6]
+        // UDP: 4 + sizeInBytes + type + 1/2 + flags [sizeInBytes+7]
+
+        if (MyJni.USE_TCP) {
+            if (outputStream != null) {
+                try {
+                    outputStream.write(data, offsetInBytes, sizeInBytes);
+                } catch (IOException e) {
+                    Log.e(TAG, "MediaClient sendData() TCP failure");
+                    e.printStackTrace();
+                    close();
+                    Phone.call(MainActivity.class.getName(), MAINACTIVITY_ON_RESUME, null);
+                }
+            }
+            return;
+        }
+
+        if (!isConnected || datagramSocket == null) {
+            Log.e(TAG, "MediaClient sendData() UDP failure for datagramSocket is null");
+            return;
+        }
+
+        // 最大传65507字节
+        DatagramPacket packet = null;
+        if (sizeInBytes <= LIMIT) {
+            if (data[sizeInBytes - 3] == 0) {
+                data[sizeInBytes - 3] = 30;
+            }
+            packet = new DatagramPacket(data, sizeInBytes, inetAddress, port);
             try {
-                outputStream.write(data, offsetInBytes, sizeInBytes);
+                datagramSocket.send(packet);
             } catch (IOException e) {
+                Log.e(TAG, "MediaClient sendData() UDP failure");
                 e.printStackTrace();
-                Log.e(TAG, "MediaClient sendData() failure");
-                //close();
+                close();
+                Phone.call(MainActivity.class.getName(), MAINACTIVITY_ON_RESUME, null);
+            }
+            return;
+        }
+
+        // 实际数据大小
+        int actualDataLength = sizeInBytes - 7;
+        int temp1 = actualDataLength / LIMIT_DATA;
+        int temp2 = actualDataLength % LIMIT_DATA;
+        if (temp2 != 0) {
+            temp1 += 1;
+        }
+        switch (temp1) {
+            case 2: {
+                Log.e(TAG, "MediaClient sendData() UDP 2 sizeInBytes: " + sizeInBytes);
+                byte[] tempData = new byte[LIMIT];
+                int2Bytes(tempData, LIMIT_DATA + 3);
+                System.arraycopy(data, 4, tempData, 4, LIMIT_DATA);
+                tempData[LIMIT_DATA + 4] = 43;
+                tempData[LIMIT_DATA + 5] = data[sizeInBytes - 3];
+                tempData[LIMIT_DATA + 6] = data[sizeInBytes - 2];
+                packet = new DatagramPacket(tempData, LIMIT, inetAddress, port);
+                try {
+                    datagramSocket.send(packet);
+                } catch (IOException e) {
+                    Log.e(TAG, "MediaClient sendData() UDP failure 43");
+                    e.printStackTrace();
+                    close();
+                    Phone.call(MainActivity.class.getName(), MAINACTIVITY_ON_RESUME, null);
+                    return;
+                }
+
+                int length = actualDataLength - LIMIT_DATA;
+                tempData = new byte[length + 7];
+                int2Bytes(tempData, length + 3);
+                System.arraycopy(data, LIMIT_DATA + 4, tempData, 4, length);
+                tempData[LIMIT_DATA + 4] = 44;
+                tempData[LIMIT_DATA + 5] = data[sizeInBytes - 3];
+                tempData[LIMIT_DATA + 6] = data[sizeInBytes - 2];
+                packet = new DatagramPacket(tempData, length + 7, inetAddress, port);
+                try {
+                    datagramSocket.send(packet);
+                } catch (IOException e) {
+                    Log.e(TAG, "MediaClient sendData() UDP failure 44");
+                    e.printStackTrace();
+                    close();
+                    Phone.call(MainActivity.class.getName(), MAINACTIVITY_ON_RESUME, null);
+                    return;
+                }
+                break;
+            }
+            case 3: {
+                Log.e(TAG, "MediaClient sendData() UDP 3 sizeInBytes: " + sizeInBytes);
+                byte[] tempData = new byte[LIMIT];
+                int2Bytes(tempData, LIMIT_DATA + 3);
+                System.arraycopy(data, 4, tempData, 4, LIMIT_DATA);
+                tempData[LIMIT_DATA + 4] = 54;
+                tempData[LIMIT_DATA + 5] = data[sizeInBytes - 3];
+                tempData[LIMIT_DATA + 6] = data[sizeInBytes - 2];
+                packet = new DatagramPacket(tempData, LIMIT, inetAddress, port);
+                try {
+                    datagramSocket.send(packet);
+                } catch (IOException e) {
+                    Log.e(TAG, "MediaClient sendData() UDP failure 54");
+                    e.printStackTrace();
+                    close();
+                    Phone.call(MainActivity.class.getName(), MAINACTIVITY_ON_RESUME, null);
+                    return;
+                }
+
+                tempData = new byte[LIMIT];
+                int2Bytes(tempData, LIMIT_DATA + 3);
+                System.arraycopy(data, LIMIT_DATA + 4, tempData, 4, LIMIT_DATA);
+                tempData[LIMIT_DATA + 4] = 55;
+                tempData[LIMIT_DATA + 5] = data[sizeInBytes - 3];
+                tempData[LIMIT_DATA + 6] = data[sizeInBytes - 2];
+                packet = new DatagramPacket(tempData, LIMIT, inetAddress, port);
+                try {
+                    datagramSocket.send(packet);
+                } catch (IOException e) {
+                    Log.e(TAG, "MediaClient sendData() UDP failure 55");
+                    e.printStackTrace();
+                    close();
+                    Phone.call(MainActivity.class.getName(), MAINACTIVITY_ON_RESUME, null);
+                    return;
+                }
+
+                int length = actualDataLength - 2 * LIMIT_DATA;
+                tempData = new byte[length + 7];
+                int2Bytes(tempData, length + 3);
+                System.arraycopy(data, 2 * LIMIT_DATA + 4, tempData, 4, length);
+                tempData[LIMIT_DATA + 4] = 56;
+                tempData[LIMIT_DATA + 5] = data[sizeInBytes - 3];
+                tempData[LIMIT_DATA + 6] = data[sizeInBytes - 2];
+                packet = new DatagramPacket(tempData, length + 7, inetAddress, port);
+                try {
+                    datagramSocket.send(packet);
+                } catch (IOException e) {
+                    Log.e(TAG, "MediaClient sendData() UDP failure 56");
+                    e.printStackTrace();
+                    close();
+                    Phone.call(MainActivity.class.getName(), MAINACTIVITY_ON_RESUME, null);
+                    return;
+                }
+                break;
+            }
+            case 4: {
+                Log.e(TAG, "MediaClient sendData() UDP 4 sizeInBytes: " + sizeInBytes);
+                byte[] tempData = new byte[LIMIT];
+                int2Bytes(tempData, LIMIT_DATA + 3);
+                System.arraycopy(data, 4, tempData, 4, LIMIT_DATA);
+                tempData[LIMIT_DATA + 4] = 65;
+                tempData[LIMIT_DATA + 5] = data[sizeInBytes - 3];
+                tempData[LIMIT_DATA + 6] = data[sizeInBytes - 2];
+                packet = new DatagramPacket(tempData, LIMIT, inetAddress, port);
+                try {
+                    datagramSocket.send(packet);
+                } catch (IOException e) {
+                    Log.e(TAG, "MediaClient sendData() UDP failure 65");
+                    e.printStackTrace();
+                    close();
+                    Phone.call(MainActivity.class.getName(), MAINACTIVITY_ON_RESUME, null);
+                    return;
+                }
+
+                tempData = new byte[LIMIT];
+                int2Bytes(tempData, LIMIT_DATA + 3);
+                System.arraycopy(data, LIMIT_DATA + 4, tempData, 4, LIMIT_DATA);
+                tempData[LIMIT_DATA + 4] = 66;
+                tempData[LIMIT_DATA + 5] = data[sizeInBytes - 3];
+                tempData[LIMIT_DATA + 6] = data[sizeInBytes - 2];
+                packet = new DatagramPacket(tempData, LIMIT, inetAddress, port);
+                try {
+                    datagramSocket.send(packet);
+                } catch (IOException e) {
+                    Log.e(TAG, "MediaClient sendData() UDP failure 66");
+                    e.printStackTrace();
+                    close();
+                    Phone.call(MainActivity.class.getName(), MAINACTIVITY_ON_RESUME, null);
+                    return;
+                }
+
+                tempData = new byte[LIMIT];
+                int2Bytes(tempData, LIMIT_DATA + 3);
+                System.arraycopy(data, 2 * LIMIT_DATA + 4, tempData, 4, LIMIT_DATA);
+                tempData[LIMIT_DATA + 4] = 67;
+                tempData[LIMIT_DATA + 5] = data[sizeInBytes - 3];
+                tempData[LIMIT_DATA + 6] = data[sizeInBytes - 2];
+                packet = new DatagramPacket(tempData, LIMIT, inetAddress, port);
+                try {
+                    datagramSocket.send(packet);
+                } catch (IOException e) {
+                    Log.e(TAG, "MediaClient sendData() UDP failure 67");
+                    e.printStackTrace();
+                    close();
+                    Phone.call(MainActivity.class.getName(), MAINACTIVITY_ON_RESUME, null);
+                    return;
+                }
+
+                int length = actualDataLength - 3 * LIMIT_DATA;
+                tempData = new byte[length + 7];
+                int2Bytes(tempData, length + 3);
+                System.arraycopy(data, 3 * LIMIT_DATA + 4, tempData, 4, length);
+                tempData[LIMIT_DATA + 4] = 68;
+                tempData[LIMIT_DATA + 5] = data[sizeInBytes - 3];
+                tempData[LIMIT_DATA + 6] = data[sizeInBytes - 2];
+                packet = new DatagramPacket(tempData, length + 7, inetAddress, port);
+                try {
+                    datagramSocket.send(packet);
+                } catch (IOException e) {
+                    Log.e(TAG, "MediaClient sendData() UDP failure 68");
+                    e.printStackTrace();
+                    close();
+                    Phone.call(MainActivity.class.getName(), MAINACTIVITY_ON_RESUME, null);
+                    return;
+                }
+                break;
+            }
+            default:
+                Log.e(TAG, "MediaClient sendData() UDP sizeInBytes: " + sizeInBytes);
+                break;
+        }
+    }
+
+    public synchronized void sendDataForUDP_Str(String info, int orientation) {
+        if (!isConnected || datagramSocket == null) {
+            Log.e(TAG, "MediaClient sendStrData() UDP failure for datagramSocket is null");
+            return;
+        }
+        Arrays.fill(frame, (byte) 0);
+        byte[] data = info.getBytes();
+        int length = data.length;
+        int2Bytes(frame, length);
+        frame[4] = (byte) ((orientation == Configuration.ORIENTATION_PORTRAIT) ? 1 : 2);
+        frame[5] = 10;  // 非视频帧
+        int2Bytes2(frame, 60010); // 字符串
+        System.arraycopy(data, 0, frame, OFFSET, length);
+        Log.i(TAG, "sendDataForUDP_Str() frame:\n" + Arrays.toString(frame));
+        try {
+            datagramSocket.send(packet);
+        } catch (IOException e) {
+            Log.e(TAG, "MediaClient sendStrData() TCP failure");
+            e.printStackTrace();
+            close();
+            Phone.call(MainActivity.class.getName(), MAINACTIVITY_ON_RESUME, null);
+        }
+    }
+
+    public synchronized void sendDataForUDP_Sps_Pps(byte[] data, boolean isPortrait) {
+        if (!isConnected || datagramSocket == null) {
+            Log.e(TAG, "MediaClient sendStrData() UDP failure for datagramSocket is null");
+            return;
+        }
+        Arrays.fill(frame, (byte) 0);
+        int length = data.length;
+        int2Bytes(frame, length);
+        frame[4] = (byte) (isPortrait ? 1 : 2);
+        frame[5] = MediaCodec.BUFFER_FLAG_CODEC_CONFIG;
+        int2Bytes2(frame, isPortrait ? 60020 : 60030);
+        System.arraycopy(data, 0, frame, OFFSET, length);
+        Log.i(TAG, "sendDataForUDP_Sps_Pps() frame:\n" + Arrays.toString(frame));
+        try {
+            datagramSocket.send(packet);
+        } catch (IOException e) {
+            Log.e(TAG, "MediaClient sendStrData() TCP failure");
+            e.printStackTrace();
+            close();
+            Phone.call(MainActivity.class.getName(), MAINACTIVITY_ON_RESUME, null);
+        }
+    }
+
+    public synchronized void sendDataForUDP(byte[] data,
+                                            int offsetInBytes,  // 偏移量(一般为0)
+                                            int sizeInBytes,    // 实际数据大小
+                                            boolean isPortrait, //
+                                            int flags) {
+        //   1/2: "1"表示竖屏, "2"表示横屏
+
+        // flags: 判断是否是关键帧
+        // 20                                  下一帧是关键帧
+        // 10                                  非视频帧(字符串)
+        // 0                                   非关键帧
+        // MediaCodec.BUFFER_FLAG_CODEC_CONFIG 配置帧
+        // MediaCodec.BUFFER_FLAG_KEY_FRAME    关键帧
+
+        //  count:
+        // "60010"表示字符串
+        // "60020"表示竖屏sps_pps
+        // "60030"表示横屏sps_pps
+        // "60040"表示完整帧(data小于[1024-8],不需要拆分)
+        // "1" ~ "n"表示这是第几次数据(如有10byte要发送,每次发送3byte,那么需要发送4次,分别是第1次,第2次,第3次,第4次)
+
+        // TCP: 4 + sizeInBytes + 1/2 + flags         [sizeInBytes+6]
+        // UDP: 4 + 1/2 + flags + count + sizeInBytes [sizeInBytes+8]
+
+        if (MyJni.USE_TCP) {
+            if (outputStream != null) {
+                try {
+                    outputStream.write(data, offsetInBytes, sizeInBytes);
+                } catch (IOException e) {
+                    Log.e(TAG, "MediaClient sendData() TCP failure");
+                    e.printStackTrace();
+                    close();
+                    Phone.call(MainActivity.class.getName(), MAINACTIVITY_ON_RESUME, null);
+                }
+            }
+            return;
+        }
+
+        if (!isConnected || datagramSocket == null) {
+            Log.e(TAG, "MediaClient sendData() UDP failure for datagramSocket is null");
+            return;
+        }
+
+        // 最大传65507字节
+        if (sizeInBytes <= LIMIT_DATA) {
+            Arrays.fill(frame, (byte) 0);
+            int2Bytes(frame, sizeInBytes);
+            frame[4] = (byte) (isPortrait ? 1 : 2);
+            frame[5] = (byte) flags;
+            int2Bytes2(frame, 60040);
+            System.arraycopy(data, 0, frame, OFFSET, sizeInBytes);
+            try {
+                datagramSocket.send(packet);
+            } catch (IOException e) {
+                Log.e(TAG, "MediaClient sendData() UDP failure");
+                e.printStackTrace();
+                close();
+                Phone.call(MainActivity.class.getName(), MAINACTIVITY_ON_RESUME, null);
+            }
+            return;
+        }
+
+        int count = 0;
+        int temp1 = sizeInBytes / LIMIT_DATA;
+        int temp2 = sizeInBytes % LIMIT_DATA;
+        if (temp2 != 0) {
+            temp1 += 1; // 需要发送temp1次之后,才能把data这个数据发送完成
+        }
+        for (int i = 0; i < temp1; i++) {
+            count++;
+            Arrays.fill(frame, (byte) 0);
+            int2Bytes(frame, sizeInBytes);
+            frame[4] = (byte) (isPortrait ? 1 : 2);
+            frame[5] = (byte) flags;
+            int2Bytes2(frame, count);
+            if (count < temp1) {
+                System.arraycopy(data, i * LIMIT_DATA, frame, OFFSET, LIMIT_DATA);
+            } else {
+                int len = sizeInBytes - (count - 1) * LIMIT_DATA;
+                System.arraycopy(data, i * LIMIT_DATA, frame, OFFSET, len);
+            }
+            try {
+                datagramSocket.send(packet);
+            } catch (IOException e) {
+                Log.e(TAG, "MediaClient sendData() UDP failure");
+                e.printStackTrace();
+                close();
+                Phone.call(MainActivity.class.getName(), MAINACTIVITY_ON_RESUME, null);
+                return;
             }
         }
     }
 
+    public synchronized void close() {
+        Log.i(TAG, "MediaClient close() start");
+        isConnected = false;
+        if (inputStream != null) {
+            try {
+                inputStream.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            inputStream = null;
+        }
+        if (outputStream != null) {
+            try {
+                outputStream.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            outputStream = null;
+        }
+        if (socket != null) {
+            try {
+                if (!socket.isInputShutdown() && !socket.isClosed()) {
+                    socket.shutdownInput();
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            try {
+                if (!socket.isOutputShutdown() && !socket.isClosed()) {
+                    socket.shutdownOutput();
+                }
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            try {
+                socket.close();
+            } catch (IOException e) {
+                e.printStackTrace();
+            }
+            socket = null;
+        }
+        if (datagramSocket != null) {
+            try {
+                if (datagramSocket.isBound() || datagramSocket.isConnected()) {
+                    datagramSocket.disconnect();
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            try {
+                if (!datagramSocket.isClosed()) {
+                    datagramSocket.close();
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+            }
+            datagramSocket = null;
+        }
+        inetAddress = null;
+
+        MediaUtils.releaseMediaCodec(mVideoMC);
+        MediaUtils.releaseMediaCodec(mAudioMC);
+        MediaUtils.releaseAudioTrack(mAudioTrack);
+        mVideoMC = null;
+        mAudioMC = null;
+        mAudioTrack = null;
+
+        mSps = null;
+        mPps = null;
+        mUploadPpsSps = true;
+        mIsHeaderWrite = false;
+        mIsKeyFrameWrite = false;
+        Log.i(TAG, "MediaClient close() end");
+    }
+
+    private static void int2Bytes(byte[] frame, int length) {
+        frame[0] = (byte) length;
+        frame[1] = (byte) (length >> 8);
+        frame[2] = (byte) (length >> 16);
+        frame[3] = (byte) (length >> 24);
+    }
+
+    private static void int2Bytes2(byte[] frame, int length) {
+        frame[6] = (byte) length;
+        frame[7] = (byte) (length >> 8);
+    }
+
+    ////////////////////////////////////////////////////////////////////////////////
+
+    // Coded slice of a non-IDR picture slice_layer_without_partitioning_rbsp( )
+    public final static int NonIDR = 1;
+    // Coded slice of an IDR picture slice_layer_without_partitioning_rbsp( )
+    public final static int IDR = 5;
+    // Supplemental enhancement information (SEI) sei_rbsp( )
+    public final static int SEI = 6;
+    // Sequence parameter set seq_parameter_set_rbsp( )
+    public final static int SPS = 7;
+    // Picture parameter set pic_parameter_set_rbsp( )
+    public final static int PPS = 8;
+    // Access unit delimiter access_unit_delimiter_rbsp( )
+    public final static int AccessUnitDelimiter = 9;
+
+    //public static final int HEADER = 0;
+    //public static final int METADATA = 1;
+    public static final int FIRST_VIDEO = 2;
+    public static final int KEY_FRAME = 5;
+    public static final int INTER_FRAME = 6;
+
+    private static final byte[] HEADER = {0x00, 0x00, 0x00, 0x01};
+
+    private byte[] mSps = null;
+    private byte[] mPps = null;
+    private boolean mUploadPpsSps = true;
+    private boolean mIsHeaderWrite = false;
+    private boolean mIsKeyFrameWrite = false;
+
+    private MediaCodec mVideoMC;
+    private MediaCodec mAudioMC;
+    private MediaFormat mVideoMF;
+    private MediaFormat mAudioMF;
+    private AudioTrack mAudioTrack;
+
     public void playVideo() {
         Log.i(TAG, "MediaClient playVideo() start");
-        if (!mIsConnected) {
+        if (!isConnected) {
             Log.e(TAG, "MediaClient playVideo() isn't connected");
             return;
         }
@@ -138,7 +636,7 @@ public class MediaClient {
         final int VIDEO_FRAME_MAX_LENGTH = mVideoMF.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE);
         final byte[] data = new byte[VIDEO_FRAME_MAX_LENGTH];
         int readCount = 0;
-        while (mIsConnected) {
+        while (isConnected) {
             Arrays.fill(data, (byte) 0);
             try {
                 readCount = inputStream.read(data, 0, VIDEO_FRAME_MAX_LENGTH);
@@ -172,7 +670,7 @@ public class MediaClient {
 
     public void playAudio() {
         Log.i(TAG, "MediaClient playAudio() start");
-        if (!mIsConnected) {
+        if (!isConnected) {
             Log.e(TAG, "MediaClient playAudio() isn't connected");
             return;
         }
@@ -216,7 +714,7 @@ public class MediaClient {
         final int AUDIO_FRAME_MAX_LENGTH = mAudioMF.getInteger(MediaFormat.KEY_MAX_INPUT_SIZE);
         final byte[] data = new byte[AUDIO_FRAME_MAX_LENGTH];
         int readCount = 0;
-        while (mIsConnected) {
+        while (isConnected) {
             Arrays.fill(data, (byte) 0);
             try {
                 readCount = inputStream.read(data, 0, AUDIO_FRAME_MAX_LENGTH);
@@ -246,91 +744,6 @@ public class MediaClient {
         }// while(...) end
         Log.i(TAG, "MediaClient playAudio() end");
     }
-
-    public synchronized void close() {
-        Log.i(TAG, "MediaClient close() start");
-        mIsConnected = false;
-        if (inputStream != null) {
-            try {
-                inputStream.close();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-            inputStream = null;
-        }
-        if (outputStream != null) {
-            try {
-                outputStream.close();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-            outputStream = null;
-        }
-        if (socket != null) {
-            try {
-                if (!socket.isInputShutdown() && !socket.isClosed()) {
-                    socket.shutdownInput();
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-            try {
-                if (!socket.isOutputShutdown() && !socket.isClosed()) {
-                    socket.shutdownOutput();
-                }
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-            try {
-                socket.close();
-            } catch (IOException e) {
-                e.printStackTrace();
-            }
-            socket = null;
-        }
-        MediaUtils.releaseMediaCodec(mVideoMC);
-        MediaUtils.releaseMediaCodec(mAudioMC);
-        MediaUtils.releaseAudioTrack(mAudioTrack);
-        mVideoMC = null;
-        mAudioMC = null;
-        mAudioTrack = null;
-
-        mSps = null;
-        mPps = null;
-        mUploadPpsSps = true;
-        mIsHeaderWrite = false;
-        mIsKeyFrameWrite = false;
-        Log.i(TAG, "MediaClient close() end");
-    }
-
-    ///////////////////////////////////////////////////////////////
-
-    // Coded slice of a non-IDR picture slice_layer_without_partitioning_rbsp( )
-    public final static int NonIDR = 1;
-    // Coded slice of an IDR picture slice_layer_without_partitioning_rbsp( )
-    public final static int IDR = 5;
-    // Supplemental enhancement information (SEI) sei_rbsp( )
-    public final static int SEI = 6;
-    // Sequence parameter set seq_parameter_set_rbsp( )
-    public final static int SPS = 7;
-    // Picture parameter set pic_parameter_set_rbsp( )
-    public final static int PPS = 8;
-    // Access unit delimiter access_unit_delimiter_rbsp( )
-    public final static int AccessUnitDelimiter = 9;
-
-    //public static final int HEADER = 0;
-    //public static final int METADATA = 1;
-    public static final int FIRST_VIDEO = 2;
-    public static final int KEY_FRAME = 5;
-    public static final int INTER_FRAME = 6;
-
-    private static final byte[] HEADER = {0x00, 0x00, 0x00, 0x01};
-
-    private byte[] mSps = null;
-    private byte[] mPps = null;
-    private boolean mUploadPpsSps = true;
-    private boolean mIsHeaderWrite = false;
-    private boolean mIsKeyFrameWrite = false;
 
     /**
      * the search result for annexb.
@@ -846,7 +1259,7 @@ public class MediaClient {
         }
     }
 
-    /***
+    /**
      * 将int转为长度为4的byte数组
      *
      * @param length

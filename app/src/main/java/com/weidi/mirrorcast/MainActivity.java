@@ -67,7 +67,7 @@ import static com.weidi.mirrorcast.Constants.START_MAINACTIVITY;
 import static com.weidi.mirrorcast.Constants.START_RECORD_SCREEN;
 import static com.weidi.mirrorcast.Constants.STOP_RECORD_SCREEN;
 import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_get_server_port;
-import static com.weidi.mirrorcast.MyJni.DECODER_MEDIA_CODEC_GO_JNI;
+import static com.weidi.mirrorcast.MyJni.USE_MEDIACODEC_FOR_JNI;
 import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_only_output_key_frame;
 import static com.weidi.mirrorcast.PlayerActivity.MAXIMUM_NUMBER;
 import static com.weidi.mirrorcast.PlayerActivity.PLAYER_ACTIVITY_IS_LIVE;
@@ -187,8 +187,8 @@ public class MainActivity extends BaseActivity {
 
     @Override
     public void onBackPressed() {
-        Object object = EventBusUtils.post(
-                MediaClientService.class, IS_RECORDING, null);
+        Object object = Phone.call(
+                MediaClientService.class.getName(), IS_RECORDING, null);
         if (object != null) {
             boolean isRecording = (boolean) object;
             if (isRecording) {
@@ -313,8 +313,9 @@ public class MainActivity extends BaseActivity {
 
     private void internalOnCreate() {
         activity = this;
-        EventBusUtils.register(this);
-        EventBusUtils.post(MediaClientService.class, SET_ACTIVITY, new Object[]{MainActivity.this});
+        Phone.register(this);
+        Phone.call(MediaClientService.class.getName(), SET_ACTIVITY,
+                new Object[]{MainActivity.this});
         mTitleView = findViewById(R.id.title_tv);
         mIpET = findViewById(R.id.ip_et);
         mPortET = findViewById(R.id.port_et);
@@ -447,6 +448,15 @@ public class MainActivity extends BaseActivity {
         }
 
         internalonNewIntent(getIntent());
+
+        /*int length = 60000;
+        byte[] frame = new byte[2];
+        frame[0] = (byte) length;
+        frame[1] = (byte) (length >> 8);
+        int value;
+        value = (int) ((frame[0] & 0xFF)
+                | ((frame[1] & 0xFF) << 8));
+        Log.i(TAG, "value: " + value);*/
     }
 
     /***
@@ -457,7 +467,7 @@ public class MainActivity extends BaseActivity {
     private void internalOnResume() {
         mIsServerLive = isRunService(this, MEDIASERVERSERVICE);
         mIsClientLive = isRunService(this, MEDIACLIENTSERVICE);
-        String IP = getIPAddress();
+        String IP = getIPAddress(getApplicationContext());
         String info = IP;
         if (!mIsServerLive && !mIsClientLive) {
             mIpET.setVisibility(View.GONE);
@@ -498,15 +508,15 @@ public class MainActivity extends BaseActivity {
             mBtn6.setVisibility(View.VISIBLE);
             mBtn7.setVisibility(View.GONE);
             mBtn1.setText("停用客户端");
-            Object object = EventBusUtils.post(
-                    MediaClientService.class, IS_RECORDING, null);
+            Object object = Phone.call(
+                    MediaClientService.class.getName(), IS_RECORDING, null);
             if (object != null) {
                 boolean isRecording = (boolean) object;
                 if (isRecording) {
                     mBtn2.setText("停止录屏");
                     setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_SENSOR);
-                    EventBusUtils.post(
-                            MediaClientService.class, SET_ACTIVITY, null);
+                    Phone.call(
+                            MediaClientService.class.getName(), SET_ACTIVITY, null);
                 } else {
                     mBtn2.setText("开始录屏");
                 }
@@ -520,8 +530,8 @@ public class MainActivity extends BaseActivity {
         mBtn6.setText("P2P断开");
         mBtn7.setText("Wifi Direct");
 
-        EventBusUtils.post(
-                MediaClientService.class, ACCELEROMETER_ROTATION, null);
+        Phone.call(
+                MediaClientService.class.getName(), ACCELEROMETER_ROTATION, null);
     }
 
     private void internalOnStop() {
@@ -551,14 +561,14 @@ public class MainActivity extends BaseActivity {
         intent.putExtra("Activity", "finish");
         sendBroadcast(intent);*/
 
-        EventBusUtils.post(MediaClientService.class, SET_ACTIVITY, null);
+        Phone.call(MediaClientService.class.getName(), SET_ACTIVITY, null);
 
         WifiP2PHelper.getInstance(getApplicationContext()).cancelConnect();
         WifiP2PHelper.getInstance(getApplicationContext()).removeGroup();
         if (mHandlerThread != null) {
             mHandlerThread.quitSafely();
         }
-        EventBusUtils.unregister(this);
+        Phone.unregister(this);
     }
 
     // Server Client
@@ -744,8 +754,8 @@ public class MainActivity extends BaseActivity {
      */
     private void requestPermission() {
         Log.i(TAG, "requestPermission()");
-        Object object = EventBusUtils.post(
-                MediaClientService.class, IS_RECORDING, null);
+        Object object = Phone.call(
+                MediaClientService.class.getName(), IS_RECORDING, null);
         if (object != null) {
             boolean isRecording = (boolean) object;
             if (isRecording) {
@@ -785,15 +795,14 @@ public class MainActivity extends BaseActivity {
                         mMediaProjectionManager.getMediaProjection(resultCode, data);
                 if (mMediaProjection == null) {
                     Log.e(TAG, "internalonActivityResult() mMediaProjection is null");
-                    EventBusUtils.post(
-                            MediaClientService.class, SET_ACTIVITY,
+                    Phone.call(
+                            MediaClientService.class.getName(), SET_ACTIVITY,
                             null);
-                    EventBusUtils.post(
-                            MediaClientService.class, SET_MEDIAPROJECTION,
+                    Phone.call(
+                            MediaClientService.class.getName(), SET_MEDIAPROJECTION,
                             null);
-                    EventBusUtils.post(
-                            MediaClientService.class, RELEASE,
-                            null);
+                    Phone.removeThreadMessages(RELEASE);
+                    Phone.callThreadDelayed(MediaClientService.class.getName(), RELEASE, 500, null);
                     return;
                 }
 
@@ -805,21 +814,22 @@ public class MainActivity extends BaseActivity {
                 }
 
                 // test
-                //IP = "192.168.0.120";
-                //PORT = 5858;
+                IP = "172.18.108.80"; // 192.168.0.120
+                PORT = 5858;
 
-                EventBusUtils.post(
-                        MediaClientService.class, SET_ACTIVITY,
+                Phone.call(
+                        MediaClientService.class.getName(), SET_ACTIVITY,
                         new Object[]{MainActivity.this});
-                EventBusUtils.post(
-                        MediaClientService.class, SET_MEDIAPROJECTION,
+                Phone.call(
+                        MediaClientService.class.getName(), SET_MEDIAPROJECTION,
                         new Object[]{mMediaProjection});
-                EventBusUtils.post(
-                        MediaClientService.class, SET_IP_AND_PORT,
+                Phone.call(
+                        MediaClientService.class.getName(), SET_IP_AND_PORT,
                         new Object[]{IP, PORT});
-                EventBusUtils.post(
-                        MediaClientService.class, START_RECORD_SCREEN,
-                        null);
+                // 发送消息,开始录屏
+                Phone.removeThreadMessages(START_RECORD_SCREEN);
+                Phone.callDelayed(
+                        MediaClientService.class.getName(), START_RECORD_SCREEN, 500, null);
 
                 mUiHandler.removeMessages(INTERNAL_ON_RESUME);
                 mUiHandler.sendEmptyMessageDelayed(INTERNAL_ON_RESUME, 3000);
@@ -855,13 +865,18 @@ public class MainActivity extends BaseActivity {
             }
             case MSG_UI_CLICK_BTN1: {
                 if (!mIsServerLive && !mIsClientLive) {
-                    JniObject jniObject = JniObject.obtain();
-                    jniObject.valueInt = whatIsDevice;
-                    jniObject.valueLong = MAXIMUM_NUMBER;
-                    jniObject.valueString = "127.0.0.1";
-                    jniObject.valueBoolean = DECODER_MEDIA_CODEC_GO_JNI;
-                    MyJni.getDefault().onTransact(MyJni.DO_SOMETHING_CODE_Server_set_ip, jniObject);
-                    jniObject = null;
+                    if (MyJni.USE_TRANSMISSION_FOR_JNI) {
+                        JniObject jniObject = JniObject.obtain();
+                        jniObject.valueInt = whatIsDevice;
+                        jniObject.valueLong = MAXIMUM_NUMBER;
+                        jniObject.valueString = "127.0.0.1";
+                        jniObject.valueBoolean = USE_MEDIACODEC_FOR_JNI;
+                        MyJni.getDefault().onTransact(
+                                MyJni.DO_SOMETHING_CODE_Server_set_ip, jniObject);
+                        jniObject = null;
+                    } else {
+
+                    }
                     startService(mMediaServerIntent);
                 } else if (mIsServerLive) {
                     stopService(mMediaServerIntent);
@@ -877,13 +892,15 @@ public class MainActivity extends BaseActivity {
                     startService(mMediaClientIntent);
                 } else if (mIsServerLive) {
                 } else if (mIsClientLive) {
-                    Object object = EventBusUtils.post(
-                            MediaClientService.class, IS_RECORDING, null);
+                    Object object = Phone.call(
+                            MediaClientService.class.getName(), IS_RECORDING, null);
                     if (object != null) {
                         boolean isRecording = (boolean) object;
                         if (isRecording) {
-                            EventBusUtils.post(
-                                    MediaClientService.class, STOP_RECORD_SCREEN, null);
+                            Phone.removeThreadMessages(STOP_RECORD_SCREEN);
+                            Phone.callThreadDelayed(
+                                    MediaClientService.class.getName(), STOP_RECORD_SCREEN,
+                                    500, null);
                         } else {
                             mUiHandler.removeMessages(REQUEST_PERMISSION);
                             mUiHandler.sendEmptyMessageDelayed(REQUEST_PERMISSION, 500);
@@ -968,7 +985,7 @@ public class MainActivity extends BaseActivity {
                         && wifiP2pInfo.groupFormed
                         && wifiP2pInfo.groupOwnerAddress != null) {
                     String hostAddress = wifiP2pInfo.groupOwnerAddress.getHostAddress();
-                    String ip = getIPAddress();
+                    String ip = getIPAddress(getApplicationContext());
                     Log.i(TAG, "ON_CONNECTION_INFO_AVAILABLE           hostAddress: " +
                             hostAddress);
                     Log.i(TAG, "ON_CONNECTION_INFO_AVAILABLE                    ip: " + ip);
@@ -985,7 +1002,8 @@ public class MainActivity extends BaseActivity {
                                 && !mWifiP2pDeviceLists.isEmpty()
                                 && !PLAYER_ACTIVITY_IS_LIVE) {
                             Log.i(TAG, "ON_CONNECTION_INFO_AVAILABLE START_MAINACTIVITY");
-                            EventBusUtils.post(MediaServerService.class, START_MAINACTIVITY, null);
+                            Phone.call(MediaServerService.class.getName(), START_MAINACTIVITY,
+                                    null);
                         }
                     }
                 }
@@ -1041,7 +1059,7 @@ public class MainActivity extends BaseActivity {
                     Log.i(TAG, "ON_CONNECTION_INFO_AVAILABLE hostAddress: " + hostAddress);
                     Log.i(TAG, "ON_CONNECTION_INFO_AVAILABLE    hostName: " + hostName);
                     Log.i(TAG, "ON_CONNECTION_INFO_AVAILABLE       hName: " + hName);
-                    String ip = getIPAddress();
+                    String ip = getIPAddress(getApplicationContext());
                     Log.i(TAG, "ON_CONNECTION_INFO_AVAILABLE          ip: " + ip);
                 }
                 break;
@@ -1076,9 +1094,12 @@ public class MainActivity extends BaseActivity {
         }
     };
 
-    private String getIPAddress() {
+    public static String getIPAddress(Context context) {
+        if (context == null) {
+            return null;
+        }
         ConnectivityManager manager =
-                (ConnectivityManager) getSystemService(Context.CONNECTIVITY_SERVICE);
+                (ConnectivityManager) context.getSystemService(Context.CONNECTIVITY_SERVICE);
         NetworkInfo info = manager.getActiveNetworkInfo();
         if (info != null && info.isConnected()) {
             if (info.getType() == ConnectivityManager.TYPE_MOBILE) {
@@ -1102,7 +1123,7 @@ public class MainActivity extends BaseActivity {
             } else if (info.getType() == ConnectivityManager.TYPE_WIFI) {
                 // 当前使用无线网络
                 WifiManager wifiManager =
-                        (WifiManager) getApplicationContext().getSystemService(Context.WIFI_SERVICE);
+                        (WifiManager) context.getSystemService(Context.WIFI_SERVICE);
                 WifiInfo wifiInfo = wifiManager.getConnectionInfo();
                 // 得到IPV4地址
                 String ipAddress = intIP2StringIP(wifiInfo.getIpAddress());
@@ -1112,7 +1133,7 @@ public class MainActivity extends BaseActivity {
             //当前无网络连接,请在设置中打开网络
         }
 
-        return "";// "127.0.0.1"
+        return null;// "127.0.0.1"
     }
 
     /**
@@ -1223,8 +1244,10 @@ public class MainActivity extends BaseActivity {
                             startActivity(intent);
                         }
                     } else if (!mIsServerLive && mIsClientLive) {
-                        EventBusUtils.post(
-                                MediaClientService.class, STOP_RECORD_SCREEN, null);
+                        Phone.removeThreadMessages(STOP_RECORD_SCREEN);
+                        Phone.callThreadDelayed(
+                                MediaClientService.class.getName(), STOP_RECORD_SCREEN,
+                                500, null);
                     }
                 }
 

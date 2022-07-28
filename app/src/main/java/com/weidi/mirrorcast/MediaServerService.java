@@ -54,7 +54,7 @@ public class MediaServerService extends Service {
 
     private void internalOnCreate() {
         Log.i(TAG, "MediaServerService internalOnCreate()");
-        EventBusUtils.register(this);
+        Phone.register(this);
 
         // 为了进程保活
         mWindowManager = (WindowManager) getSystemService(Context.WINDOW_SERVICE);
@@ -90,20 +90,32 @@ public class MediaServerService extends Service {
             mView = null;
         }
 
-        EventBusUtils.unregister(this);
+        Phone.unregister(this);
     }
 
-    private synchronized Object onEvent(int what, Object[] objArray) {
+    private Object onEvent(int what, Object[] objArray) {
         Object result = null;
         switch (what) {
             case START_SERVER: {
                 if (!mIsServerStarted) {
+                    mIsServerStarted = true;
                     new Thread(new Runnable() {
                         @Override
                         public void run() {
-                            mIsServerStarted = true;
-                            MyJni.getDefault().onTransact(
-                                    MyJni.DO_SOMETHING_CODE_Server_accept, null);
+                            if (MyJni.USE_TRANSMISSION_FOR_JNI) {
+                                if (MyJni.USE_TCP) {
+                                    MyJni.getDefault().onTransact(
+                                            MyJni.DO_SOMETHING_CODE_Server_accept, null);
+                                } else {
+
+                                }
+                            } else {
+                                if (MyJni.USE_TCP) {
+
+                                } else {
+                                    MediaServer.getInstance().start();
+                                }
+                            }
                         }
                     }).start();
                 }
@@ -111,12 +123,24 @@ public class MediaServerService extends Service {
             }
             case STOP_SERVER: {
                 if (mIsServerStarted) {
+                    mIsServerStarted = false;
                     new Thread(new Runnable() {
                         @Override
                         public void run() {
-                            MyJni.getDefault().onTransact(
-                                    MyJni.DO_SOMETHING_CODE_Server_close, null);
-                            mIsServerStarted = false;
+                            if (MyJni.USE_TRANSMISSION_FOR_JNI) {
+                                if (MyJni.USE_TCP) {
+                                    MyJni.getDefault().onTransact(
+                                            MyJni.DO_SOMETHING_CODE_Server_close, null);
+                                } else {
+
+                                }
+                            } else {
+                                if (MyJni.USE_TCP) {
+
+                                } else {
+                                    MediaServer.getInstance().close();
+                                }
+                            }
                         }
                     }).start();
                 }

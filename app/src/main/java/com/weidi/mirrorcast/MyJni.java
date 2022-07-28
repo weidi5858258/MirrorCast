@@ -8,6 +8,7 @@ import android.media.MediaCodecInfo;
 import android.text.TextUtils;
 import android.util.Log;
 
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Iterator;
 import java.util.concurrent.ArrayBlockingQueue;
@@ -97,8 +98,17 @@ public class MyJni {
     public static final int DO_SOMETHING_CODE_find_createLandscapeVirtualDisplay = 2005;
     public static final int DO_SOMETHING_CODE_find_encoder_send_data_error = 2006;
 
-    public static final boolean ENCODER_MEDIA_CODEC_GO_JNI = true;
-    public static final boolean DECODER_MEDIA_CODEC_GO_JNI = true;
+    // 上层编解码,上层传输
+    // 上层编解码,底层传输
+    // 底层编解码,上层传输
+    // 底层编解码,底层传输
+
+    // true表示使用native进行编解码,false表示使用java进行编解码
+    public static final boolean USE_MEDIACODEC_FOR_JNI = false;
+    // true表示使用native进行tcp或者udp传输,false表示使用java进行tcp或者udp传输
+    public static final boolean USE_TRANSMISSION_FOR_JNI = false;
+    // true表示使用TCP进行数据的传输,false表示使用UDP进行数据的传输,还需要跟底层一起统一(值还没有想好)
+    public static final boolean USE_TCP = false;
 
     private Context mContext;
     private static final int QUEUE_LENGTH = 50;
@@ -112,6 +122,7 @@ public class MyJni {
 
     public void setContext(Context context) {
         mContext = context;
+        Phone.register(this);
     }
 
     public void onDestroy() {
@@ -360,17 +371,17 @@ public class MyJni {
                 break;
             }
             case DO_SOMETHING_CODE_find_createPortraitVirtualDisplay: {
-                EventBusUtils.post(MediaClientService.class,
+                Phone.call(MediaClientService.class.getName(),
                         DO_SOMETHING_CODE_find_createPortraitVirtualDisplay, null);
                 break;
             }
             case DO_SOMETHING_CODE_find_createLandscapeVirtualDisplay: {
-                EventBusUtils.post(MediaClientService.class,
+                Phone.call(MediaClientService.class.getName(),
                         DO_SOMETHING_CODE_find_createLandscapeVirtualDisplay, null);
                 break;
             }
             case DO_SOMETHING_CODE_find_encoder_send_data_error: {
-                EventBusUtils.post(MediaClientService.class,
+                Phone.call(MediaClientService.class.getName(),
                         DO_SOMETHING_CODE_find_encoder_send_data_error, null);
                 break;
             }
@@ -410,7 +421,8 @@ public class MyJni {
         return null;
     }
 
-    private void putData(int which_client, byte[] frame, int length) {
+    // 上层使用UDP时也会使用到这个函数
+    public void putData(int which_client, byte[] frame, int length) {
         switch (which_client) {
             case 1: {
                 if (mPlayQueue1 != null) {
@@ -434,6 +446,46 @@ public class MyJni {
             }
             default:
                 return;
+        }
+    }
+
+    private ArrayList<byte[]> list = new ArrayList<>();
+
+    public void drainFrame() {
+        if (mPlayQueue1 != null && !mPlayQueue1.isEmpty()) {
+            try {
+                list.clear();
+                list.addAll(mPlayQueue1);
+                Log.i(TAG, "drainFrame() size1: " + mPlayQueue1.size());
+                Log.i(TAG, "drainFrame() size1: " + list.size());
+                int size = list.size();
+                int index = -1;
+                for (int i = size - 1; i >= 0; i--) {
+                    byte[] frame = list.get(i);
+                    if (frame[frame.length - 1] == MediaCodec.BUFFER_FLAG_KEY_FRAME) {
+                        // 关键帧
+                        index = i;
+                        Log.i(TAG, "drainFrame()  size: " + size);
+                        Log.i(TAG, "drainFrame() index: " + index);
+                        break;
+                    }
+                }
+                if (index == -1) {
+                    // 队列里都是非关键帧,因为有非关键帧丢失了,所以与之在同一个GOP中的非关键帧都要抛弃
+                    mPlayQueue1.clear();
+                } else {
+                    for (int i = index + 1; i < size; i++) {
+                        // index之后的帧都是非关键帧,与被丢失的帧是同一个GOP,需要都主动抛弃
+                        list.remove(i);
+                    }
+                    mPlayQueue1.clear();
+                    mPlayQueue1.addAll(list);
+                }
+                Log.i(TAG, "drainFrame() size2: " + mPlayQueue1.size());
+                Log.i(TAG, "drainFrame() size2: " + list.size());
+            } catch (Exception e) {
+                Log.e(TAG, "putDataToJava() exception : " + e.toString());
+            }
         }
     }
 
@@ -519,6 +571,29 @@ public class MyJni {
         }
 
         return codecName;
+    }
+
+    private Object onEvent(int what, Object[] objArray) {
+        Object result = null;
+        switch (what) {
+            case DO_SOMETHING_CODE_Client_set_info: {
+                if (objArray != null && objArray.length > 0) {
+                    // DO_SOMETHING_CODE_connected
+                    // DO_SOMETHING_CODE_Client_set_info
+                    JniObject jniObject = JniObject.obtain();
+                    jniObject.valueInt = 1;
+                    jni2Java(DO_SOMETHING_CODE_connected, jniObject);
+
+                    jniObject.valueString = (String) objArray[0];
+                    jniObject.valueLong = jniObject.valueString.length();
+                    jni2Java(DO_SOMETHING_CODE_Client_set_info, jniObject);
+                }
+                break;
+            }
+            default:
+                break;
+        }
+        return result;
     }
 
     public MediaServer.OnClientListener mOnClientListener =
