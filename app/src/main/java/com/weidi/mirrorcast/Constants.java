@@ -15,6 +15,7 @@ public interface Constants {
     int START_MAINACTIVITY = 10;
     int MAINACTIVITY_ON_RESUME = 11;
     int ACCELEROMETER_ROTATION = 100;
+    int SERVER_SEND_DATA = 101;
 
 
     int REQUEST_PERMISSION = 3;

@@ -46,6 +46,7 @@ import static com.weidi.mirrorcast.Constants.SET_IP_AND_PORT;
 import static com.weidi.mirrorcast.Constants.SET_MEDIAPROJECTION;
 import static com.weidi.mirrorcast.Constants.START_RECORD_SCREEN;
 import static com.weidi.mirrorcast.Constants.STOP_RECORD_SCREEN;
+import static com.weidi.mirrorcast.MediaClient.int2Bytes;
 import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_find_createLandscapeVirtualDisplay;
 import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_find_createPortraitVirtualDisplay;
 import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_find_encoder_send_data_error;
@@ -913,6 +914,12 @@ public class MediaClientService extends Service {
                 Log.e(TAG, "startRecordScreen() return for connect failure");
                 return;
             }
+            new Thread(new Runnable() {
+                @Override
+                public void run() {
+                    mClient.startServerSocket();
+                }
+            }).start();
             // 客户端的基本信息
             mClient.sendDataForUDP_Str(sb.toString(), tempOrientation);
         }
@@ -1441,19 +1448,6 @@ public class MediaClientService extends Service {
             }*/
         }
         return codecName;
-    }
-
-    /**
-     * 将int转为长度为4的byte数组
-     *
-     * @param length
-     * @return
-     */
-    private static void int2Bytes(byte[] frame, int length) {
-        frame[0] = (byte) length;
-        frame[1] = (byte) (length >> 8);
-        frame[2] = (byte) (length >> 16);
-        frame[3] = (byte) (length >> 24);
     }
 
     private MediaProjection.Callback mMediaProjectionCallback =

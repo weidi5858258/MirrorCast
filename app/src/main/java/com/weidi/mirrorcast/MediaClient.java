@@ -6,6 +6,7 @@ import android.media.AudioManager;
 import android.media.AudioTrack;
 import android.media.MediaCodec;
 import android.media.MediaFormat;
+import android.os.SystemClock;
 import android.text.TextUtils;
 import android.util.Log;
 
@@ -15,11 +16,15 @@ import java.io.OutputStream;
 import java.net.DatagramPacket;
 import java.net.DatagramSocket;
 import java.net.InetAddress;
+import java.net.InetSocketAddress;
+import java.net.ServerSocket;
 import java.net.Socket;
 import java.nio.ByteBuffer;
 import java.util.Arrays;
+import java.util.HashMap;
 
 import static com.weidi.mirrorcast.Constants.MAINACTIVITY_ON_RESUME;
+import static com.weidi.mirrorcast.MediaServer.bytesToInt;
 
 public class MediaClient {
 
@@ -52,6 +57,10 @@ public class MediaClient {
     private InetAddress inetAddress;
     private byte[] frame;
     private DatagramPacket packet;
+    // Test
+    private ServerSocket server;
+    private HashMap<Integer, byte[]> dataMap;
+    private Object lock = new Object();
 
     public AudioTrack getmAudioTrack() {
         return mAudioTrack;
@@ -107,6 +116,7 @@ public class MediaClient {
                 LIMIT_DATA = LIMIT - OFFSET;*/
                 frame = new byte[LIMIT];
                 packet = new DatagramPacket(frame, LIMIT, inetAddress, port);
+                dataMap = new HashMap<>();
                 isConnected = true;
                 Log.i(TAG, "MediaClient connect() udp success ip: " + ip + " port: " + port);
                 return true;
@@ -447,6 +457,11 @@ public class MediaClient {
             return;
         }
 
+        // 把要发送的数据先保存起来,接收端如果接收失败了,可以再次重新发送
+        if (!dataMap.containsKey(sizeInBytes)) {
+            dataMap.put(sizeInBytes, data);
+        }
+
         // 最大传65507字节
         if (sizeInBytes <= LIMIT_DATA) {
             Arrays.fill(frame, (byte) 0);
@@ -457,6 +472,11 @@ public class MediaClient {
             System.arraycopy(data, 0, frame, OFFSET, sizeInBytes);
             try {
                 datagramSocket.send(packet);
+                /*if (flags == MediaCodec.BUFFER_FLAG_KEY_FRAME) {
+                    if (!next()) {
+                        sendDataForUDP(data, offsetInBytes, sizeInBytes, isPortrait, flags);
+                    }
+                }*/
             } catch (IOException e) {
                 Log.e(TAG, "MediaClient sendData() UDP failure");
                 e.printStackTrace();
@@ -487,6 +507,12 @@ public class MediaClient {
             }
             try {
                 datagramSocket.send(packet);
+                /*if (count >= temp1 && flags == MediaCodec.BUFFER_FLAG_KEY_FRAME) {
+                    // 发送最后一帧时,并且是关键帧,那么请等待一下,等到对方返回一些信息后才决定下一步怎么走
+                    if (!next()) {
+                        sendDataForUDP(data, offsetInBytes, sizeInBytes, isPortrait, flags);
+                    }
+                }*/
             } catch (IOException e) {
                 Log.e(TAG, "MediaClient sendData() UDP failure");
                 e.printStackTrace();
@@ -495,6 +521,73 @@ public class MediaClient {
                 return;
             }
         }
+    }
+
+    public void startServerSocket() {
+        try {
+            Log.i(TAG, "MediaClient startServerSocket() start");
+            // 第一种方式
+            // server = new ServerSocket(PORT);
+            // 第二种方式
+            server = new ServerSocket();
+            server.setReuseAddress(true);
+            server.bind(new InetSocketAddress(MediaServer.PORT));
+            Log.i(TAG, "MediaClient startServerSocket() end");
+        } catch (Exception e) {
+            // java.net.BindException: bind failed: EADDRINUSE (Address already in use)
+            // Caused by: android.system.ErrnoException:
+            Log.e(TAG, "MediaClient new ServerSocket failure");
+            e.printStackTrace();
+            close();
+            return;
+        }
+        try {
+            Log.i(TAG, "MediaClient sccept() start");
+            socket = server.accept();
+            Log.i(TAG, "MediaClient sccept() end");
+        } catch (Exception e) {
+            Log.e(TAG, "MediaClient sccept() failure");
+            e.printStackTrace();
+            close();
+            return;
+        }
+        try {
+            inputStream = socket.getInputStream();
+        } catch (Exception e) {
+            Log.e(TAG, "MediaClient getInputStream() failure");
+            e.printStackTrace();
+            close();
+        }
+
+        /*int dataLength = 0;
+        int isSuccessful = 0; // 0表示成功,否则表示失败
+        int isPortrait = 0;   // 1表示竖屏,2表示横屏
+        while (isConnected) {
+            readForTest(inputStream, 6);
+            dataLength = bytesToInt(bufferForTest);
+            isSuccessful = bufferForTest[4];
+            isPortrait = bufferForTest[5];
+            if (isSuccessful == 0) {
+                // 接收成功,那么删除相应的数据
+                synchronized (lock) {
+                    if (dataMap.containsKey(dataLength)) {
+                        byte[] data = dataMap.get(dataLength);
+                        data = null;
+                        dataMap.remove(dataLength);
+                    }
+                }
+            } else {
+                // 接收失败,那么重新发送
+                synchronized (lock) {
+                    if (dataMap.containsKey(dataLength)) {
+                        byte[] data = dataMap.get(dataLength);
+                        // send
+                        sendDataForUDP(data, 0, dataLength,
+                                (isPortrait == 1) ? true : false, MediaCodec.BUFFER_FLAG_KEY_FRAME);
+                    }
+                }
+            }
+        }*/
     }
 
     public synchronized void close() {
@@ -572,14 +665,57 @@ public class MediaClient {
         Log.i(TAG, "MediaClient close() end");
     }
 
-    private static void int2Bytes(byte[] frame, int length) {
+    private byte[] buffer = new byte[6];
+    private byte[] bufferForTest = new byte[6];
+
+    private boolean next() {
+        if (inputStream == null) {
+            return true;
+        }
+
+        Log.i(TAG, "MediaClient next() UDP 1");
+        readForTest(inputStream, 6);
+        int dataLength = bytesToInt(bufferForTest);
+        int isSuccessful = bufferForTest[4];
+        int isPortrait = bufferForTest[5];
+        Log.i(TAG, "MediaClient next() UDP 2 isSuccessful: " + isSuccessful);
+        if (isSuccessful == 0) {
+            // 接收成功,那么删除相应的数据
+            return true;
+        } else {
+            // 接收失败,那么重新发送
+            return false;
+        }
+    }
+
+    private void readForTest(InputStream is, int want_to_read_length) {
+        int read_length = -1;
+        int total_read_length = 0;
+        while (total_read_length < want_to_read_length) {
+            try {
+                read_length = is.read(buffer, 0, want_to_read_length - total_read_length);
+                if (read_length != -1) {
+                    System.arraycopy(buffer, 0, bufferForTest, total_read_length, read_length);
+                    total_read_length += read_length;
+                    continue;
+                }
+                return;
+            } catch (Exception e) {
+                e.printStackTrace();
+                return;
+            }
+        }
+        return;
+    }
+
+    public static void int2Bytes(byte[] frame, int length) {
         frame[0] = (byte) length;
         frame[1] = (byte) (length >> 8);
         frame[2] = (byte) (length >> 16);
         frame[3] = (byte) (length >> 24);
     }
 
-    private static void int2Bytes2(byte[] frame, int length) {
+    public static void int2Bytes2(byte[] frame, int length) {
         frame[6] = (byte) length;
         frame[7] = (byte) (length >> 8);
     }

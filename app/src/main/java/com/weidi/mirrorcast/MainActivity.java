@@ -815,6 +815,7 @@ public class MainActivity extends BaseActivity {
 
                 // test
                 IP = "172.18.108.80"; // 192.168.0.120
+                IP = "172.18.90.50"; // 192.168.0.120
                 PORT = 5858;
 
                 Phone.call(

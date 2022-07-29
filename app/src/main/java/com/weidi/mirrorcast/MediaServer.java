@@ -14,13 +14,16 @@ import java.net.ServerSocket;
 import java.net.Socket;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import static com.weidi.mirrorcast.Constants.SERVER_SEND_DATA;
 import static com.weidi.mirrorcast.MediaClient.LIMIT;
 import static com.weidi.mirrorcast.MediaClient.LIMIT_DATA;
 import static com.weidi.mirrorcast.MediaClient.OFFSET;
+import static com.weidi.mirrorcast.MediaClient.int2Bytes;
 import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_Client_set_info;
 
 /***
@@ -32,7 +35,7 @@ public class MediaServer {
             "player_alexander";
 
     private volatile static MediaServer sMediaServer;
-    public static final int PORT = 8890;// 8890
+    public static final int PORT = 9000; // 8890
     private ConcurrentHashMap<Socket, InputStream> map =
             new ConcurrentHashMap<Socket, InputStream>();
     private Iterator<Map.Entry<Socket, InputStream>> iterator;
@@ -53,6 +56,8 @@ public class MediaServer {
     private byte[] frame;
     private DatagramPacket packet;
     private MyJni myJni;
+    // Test
+    private HashMap<Integer, byte[]> dataMap;
 
     private byte[] sps_pps_portrait = null;
     private byte[] sps_pps_landscape = null;
@@ -72,7 +77,7 @@ public class MediaServer {
     }
 
     private MediaServer() {
-
+        Phone.register(this);
     }
 
     public static MediaServer getInstance() {
@@ -143,7 +148,7 @@ public class MediaServer {
             new Thread(new Runnable() {
                 @Override
                 public void run() {
-                    receiveData();
+                    receiveDataForTCP();
                 }
             }).start();
         }
@@ -197,7 +202,7 @@ public class MediaServer {
     }
 
     // UDP
-    public void start() {
+    public void startServerForUDP() {
         if (isHandling || datagramSocket != null) {
             Log.e(TAG, "MediaServer start() return");
             return;
@@ -207,7 +212,7 @@ public class MediaServer {
         receiveDataForUDP();
     }
 
-    private void receiveData() {
+    private void receiveDataForTCP() {
         isHandling = true;
         byte[] frame = null;
 
@@ -264,7 +269,9 @@ public class MediaServer {
     private void receiveDataForUDP() {
         try {
             // String ip = MainActivity.getIPAddress();
-            String ip = "172.18.108.80";
+            String ip = "192.168.3.103";
+            // String ip = "172.18.108.80";
+            // String ip = "172.18.90.50";
             InetAddress inetAddress = InetAddress.getByName(ip);
             datagramSocket = new DatagramSocket(5858, inetAddress);
             /*LIMIT = BUFFER_FLAG_NOT_KEY_FRAME;
@@ -359,6 +366,9 @@ public class MediaServer {
             mOnClientListener.onClient(1, OnClientListener.CLIENT_TYPE_CONNECT);
         }*/
 
+        connect();
+        COUNT = 0;
+
         int count = 0;
         int tempLength = 0; // 表示某帧的数据大小
         int temp1 = 0;
@@ -415,12 +425,28 @@ public class MediaServer {
                     tempData[length + 1] = data[5];
                     // 送入队列
                     myJni.putData(1, tempData, tempData.length);
+                    if (data[5] == MediaCodec.BUFFER_FLAG_KEY_FRAME) {
+                        MyData myData = new MyData();
+                        myData.dataLength = length;
+                        myData.isSuccessful = 0;
+                        myData.isPortrait = data[4];
+                        Phone.callThreadDelayed(MediaServer.class.getName(),
+                                SERVER_SEND_DATA, 0, new Object[]{myData});
+                    }
                     count = 0;
                     tempLength = 0;
                     temp1 = 0;
                     temp2 = 0;
                     continue;
                 }
+
+                Log.i(TAG, "MediaServer receiveDataForUDP()-----------------------");
+                Log.i(TAG, "MediaServer receiveDataForUDP()    data[5]: " + data[5]);
+                Log.i(TAG, "MediaServer receiveDataForUDP() tempLength: " + tempLength);
+                Log.i(TAG, "MediaServer receiveDataForUDP()     length: " + length);
+                Log.i(TAG, "MediaServer receiveDataForUDP()      temp1: " + temp1);
+                Log.i(TAG, "MediaServer receiveDataForUDP()      count: " + count);
+                Log.i(TAG, "MediaServer receiveDataForUDP()  dataCount: " + sendDataCount);
 
                 if (sendDataCount == 1) {
                     // 当前帧数据量比较大,需要分段读取,"1"表示第一次读的数据
@@ -437,41 +463,56 @@ public class MediaServer {
                     continue;
                 }
 
-                if (tempLength != 0) {
-                    if (tempLength == length) {
-                        count++;
-                        // 如果读取到的次数(data[6])跟这里累加的次数(count)相等,并且数据大小也是相等的
-                        // 那么说明数据包没有丢失,现在读取到的数据都是属于某一帧分段后的数据.
-                        if (count < temp1) {
-                            System.arraycopy(data, OFFSET,
-                                    tempData, (count - 1) * LIMIT_DATA, LIMIT_DATA);
-                        } else {
-                            // 最后一次读取的数据
-                            int len = tempLength - (count - 1) * LIMIT_DATA;
-                            System.arraycopy(data, OFFSET,
-                                    tempData, (count - 1) * LIMIT_DATA, len);
-                            tempData[length] = data[4];
-                            tempData[length + 1] = data[5];
-                            // 送入队列
-                            myJni.putData(1, tempData, tempData.length);
-                            count = 0;
-                            tempLength = 0;
-                            temp1 = 0;
-                            temp2 = 0;
-                        }
+                if (tempLength != 0 && tempLength == length) {
+                    count++;
+                    // 如果读取到的次数(data[6])跟这里累加的次数(count)相等,并且数据大小也是相等的
+                    // 那么说明数据包没有丢失,现在读取到的数据都是属于某一帧分段后的数据.
+                    if (count != sendDataCount && data[5] == MediaCodec.BUFFER_FLAG_KEY_FRAME) {
+                        MyData myData = new MyData();
+                        myData.dataLength = tempLength;
+                        myData.isSuccessful = 1;
+                        myData.isPortrait = data[4];
+                        Phone.callThread(MediaServer.class.getName(),
+                                SERVER_SEND_DATA, new Object[]{myData});
+                        continue;
+                    }
+                    if (count < temp1) {
+                        System.arraycopy(data, OFFSET,
+                                tempData, (count - 1) * LIMIT_DATA, LIMIT_DATA);
                     } else {
-                        Log.i(TAG, "MediaServer receiveDataForUDP()-----------------------");
-                        Log.i(TAG, "MediaServer receiveDataForUDP()    data[5]: " + data[5]);
-                        Log.i(TAG, "MediaServer receiveDataForUDP() tempLength: " + tempLength);
-                        Log.i(TAG, "MediaServer receiveDataForUDP()     length: " + length);
-                        Log.i(TAG, "MediaServer receiveDataForUDP()      temp1: " + temp1);
-                        Log.i(TAG, "MediaServer receiveDataForUDP()      count: " + count);
-                        Log.i(TAG, "MediaServer receiveDataForUDP()  dataCount: " + sendDataCount);
-                        if (data[5] != MediaCodec.BUFFER_FLAG_KEY_FRAME) {
-                            // 非关键帧有丢失,那么与之在同一个GOP中的其他非关键帧也要抛弃掉
-                            needToAbandon = true;
-                            myJni.drainFrame();
+                        // 最后一次读取的数据
+                        int len = tempLength - (count - 1) * LIMIT_DATA;
+                        System.arraycopy(data, OFFSET,
+                                tempData, (count - 1) * LIMIT_DATA, len);
+                        tempData[length] = data[4];
+                        tempData[length + 1] = data[5];
+                        // 送入队列
+                        myJni.putData(1, tempData, tempData.length);
+                        if (data[5] == MediaCodec.BUFFER_FLAG_KEY_FRAME) {
+                            MyData myData = new MyData();
+                            myData.dataLength = tempLength;
+                            myData.isSuccessful = 0;
+                            myData.isPortrait = data[4];
+                            Phone.callThreadDelayed(MediaServer.class.getName(),
+                                    SERVER_SEND_DATA, 0, new Object[]{myData});
                         }
+                        count = 0;
+                        tempLength = 0;
+                        temp1 = 0;
+                        temp2 = 0;
+                    }
+                } else {
+                    if (data[5] == MediaCodec.BUFFER_FLAG_KEY_FRAME) {
+                        MyData myData = new MyData();
+                        myData.dataLength = tempLength;
+                        myData.isSuccessful = 1;
+                        myData.isPortrait = data[4];
+                        Phone.callThread(MediaServer.class.getName(),
+                                SERVER_SEND_DATA, new Object[]{myData});
+                    } else {
+                        // 非关键帧有丢失,那么与之在同一个GOP中的其他非关键帧也要抛弃掉
+                        needToAbandon = true;
+                        myJni.drainFrame();
                     }
                 }
 
@@ -501,6 +542,23 @@ public class MediaServer {
         }*/
 
         close();
+    }
+
+    public void connect() {
+        try {
+            String ip = "192.168.3.100";
+            // String ip = "172.18.90.50";
+            socket = new Socket(ip, MediaServer.PORT);
+            outputStream = socket.getOutputStream();
+            dataMap = new HashMap<>();
+            Log.i(TAG, "MediaClient startSocketForWriteData() tcp success ip: " + ip
+                    + " port: " + MediaServer.PORT);
+        } catch (Exception e) {
+            Log.e(TAG, "MediaClient startSocketForWriteData() failure");
+            e.printStackTrace();
+            close();
+            return;
+        }
     }
 
     public synchronized void close() {
@@ -648,41 +706,13 @@ public class MediaServer {
         return buff;
     }
 
-    private byte[] readForUDP(int want_to_read_length) {
-        int read_length = -1;
-        int total_read_length = 0;
-        byte[] buff = new byte[want_to_read_length];
-        DatagramPacket packet = null;
-        while (total_read_length < want_to_read_length) {
-            try {
-                packet = new DatagramPacket(buffer, 0, want_to_read_length - total_read_length);
-                if (datagramSocket != null) {
-                    datagramSocket.receive(packet);
-                }
-                read_length = packet.getLength();
-                if (read_length > 0) {
-                    System.arraycopy(packet.getData(), 0, buff, total_read_length, read_length);
-                    total_read_length += read_length;
-                    continue;
-                }
-                buff = null;
-                return null;
-            } catch (Exception e) {
-                e.printStackTrace();
-                buff = null;
-                return null;
-            }
-        }
-        return buff;
-    }
-
     /***
      * byte数组中取int数值，本方法适用于(低位在前，高位在后)的顺序，和intToBytes()配套使用
      *
      * @param src byte数组
      * @return int数值
      */
-    private static int bytesToInt(byte[] src) {
+    public static int bytesToInt(byte[] src) {
         int value;
         value = (int) ((src[0] & 0xFF)
                 | ((src[1] & 0xFF) << 8)
@@ -691,7 +721,7 @@ public class MediaServer {
         return value;
     }
 
-    private static int bytesToInt2(byte[] src) {
+    public static int bytesToInt2(byte[] src) {
         int value;
         value = (int) ((src[6] & 0xFF)
                 | ((src[7] & 0xFF) << 8));
@@ -700,6 +730,44 @@ public class MediaServer {
 
     private void putData(int which_client, byte[] buffer) {
         //MyJni.getDefault().putDataToJava(which_client, buffer, buffer.length);
+    }
+
+    private byte[] bufferForTest = new byte[6];
+
+    private static class MyData {
+        private int dataLength = 0;
+        private int isSuccessful = 0; // 0表示成功,否则表示失败
+        private int isPortrait = 0;   // 1表示竖屏,2表示横屏
+    }
+
+    private long COUNT = 0;
+
+    private Object onEvent(int what, Object[] objArray) {
+        Object result = null;
+        switch (what) {
+            case SERVER_SEND_DATA: {
+                if (objArray != null && objArray.length >= 1) {
+                    MyData myData = (MyData) objArray[0];
+                    int2Bytes(bufferForTest, myData.dataLength);
+                    bufferForTest[4] = (byte) myData.isSuccessful; // 0表示接收成功,否则表示接收失败
+                    bufferForTest[5] = (byte) myData.isPortrait;   // 1表示竖屏,2表示横屏
+                    if (outputStream != null) {
+                        try {
+                            COUNT++;
+                            Log.i(TAG, "MediaServer onEvent() COUNT: " + COUNT +
+                                    " length: " + myData.dataLength);
+                            outputStream.write(bufferForTest, 0, 6);
+                        } catch (IOException e) {
+                            e.printStackTrace();
+                        }
+                    }
+                }
+                break;
+            }
+            default:
+                break;
+        }
+        return result;
     }
 
 }

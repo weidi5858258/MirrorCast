@@ -1,11 +1,8 @@
 package com.weidi.mirrorcast;
 
 import android.app.Service;
-import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
-import android.net.wifi.p2p.WifiP2pManager;
 import android.os.Build;
 import android.os.IBinder;
 import android.util.Log;
@@ -113,7 +110,7 @@ public class MediaServerService extends Service {
                                 if (MyJni.USE_TCP) {
 
                                 } else {
-                                    MediaServer.getInstance().start();
+                                    MediaServer.getInstance().startServerForUDP();
                                 }
                             }
                         }
