@@ -18,6 +18,9 @@ import java.util.Iterator;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
 
+import static com.weidi.mirrorcast.MediaClient.LIMIT;
+import static com.weidi.mirrorcast.MediaClient.LIMIT_DATA;
+import static com.weidi.mirrorcast.MediaClient.OFFSET;
 import static com.weidi.mirrorcast.MyJni.DO_SOMETHING_CODE_Client_set_info;
 
 /***
@@ -46,11 +49,6 @@ public class MediaServer {
     private OutputStream outputStream;
 
     // UDP
-    public static final int BUFFER_FLAG_KEY_FRAME = 3076 * 10;
-    public static final int BUFFER_FLAG_NOT_KEY_FRAME = 1024 * 10;
-    public static final int LIMIT = 1280 * 10; // 15360 12800 10240
-    public static final int OFFSET = 8;
-    public static final int LIMIT_DATA = LIMIT - OFFSET;
     private DatagramSocket datagramSocket;
     private byte[] frame;
     private DatagramPacket packet;
@@ -361,7 +359,6 @@ public class MediaServer {
             mOnClientListener.onClient(1, OnClientListener.CLIENT_TYPE_CONNECT);
         }*/
 
-        Log.i(TAG, "MediaServer receiveDataForUDP() start");
         int count = 0;
         int tempLength = 0; // 表示某帧的数据大小
         int temp1 = 0;
@@ -370,6 +367,7 @@ public class MediaServer {
         ArrayList<Integer> list = new ArrayList<>();
         long totalLength = 0;
         boolean needToAbandon = false; // 需要抛弃
+        Log.i(TAG, "MediaServer receiveDataForUDP() start");
         while (isHandling) {
             if (datagramSocket == null) {
                 Log.e(TAG, "MediaServer receiveDataForUDP() break for datagramSocket is null");
@@ -498,9 +496,9 @@ public class MediaServer {
         }
         Log.i(TAG, "MediaServer receiveDataForUDP() end");
 
-        if (mOnClientListener != null) {
+        /*if (mOnClientListener != null) {
             mOnClientListener.onClient(1, OnClientListener.CLIENT_TYPE_DISCONNECT);
-        }
+        }*/
 
         close();
     }
